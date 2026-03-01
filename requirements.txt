@@ -1,0 +1,30 @@
+# ── OpenAI (대본 + TTS + 자막) ──
+openai>=1.0,<2.0
+
+# ── Gemini (썸네일) ──
+google-generativeai>=0.8,<1.0
+
+# ── YouTube Upload ──
+google-api-python-client>=2.0,<3.0
+google-auth-oauthlib>=1.0,<2.0
+google-auth-httplib2>=0.2,<1.0
+
+# ── News Research (Fallback) ──
+feedparser>=6.0,<7.0
+
+# ── Trending Research (Primary) ──
+pytrends>=4.9,<5.0
+
+# ── Asset Collection ──
+yt-dlp>=2024.1.0
+requests>=2.31,<3.0
+beautifulsoup4>=4.12,<5.0
+Pillow>=10.0,<12.0
+
+# ── Video Editing ──
+moviepy>=1.0.3,<2.0
+
+# ── Utilities ──
+python-dotenv>=1.0,<2.0
+rich>=13.0,<14.0
+streamlit>=1.32,<2.0

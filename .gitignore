@@ -1,0 +1,17 @@
+# 출력물 (영상/이미지/오디오)
+output/
+
+# API 키 및 인증정보
+credentials/
+.env
+*.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# OS
+.DS_Store
