@@ -59,10 +59,10 @@ def _check_login() -> bool:
             try:
                 pw_hash = st.secrets.get(
                     "AUTH_PASSWORD_HASH",
-                    "$2b$12$KL28nM/uZoBhjkgTjMq7uuvenTylq3yPf5SRBYwMsrvITJRxfrINi"
+                    "$2b$12$T2LBSAUwBwqe04QxeF18QO5OMZZdSRYg0Ux8mv5xT3T/rg0hKOlym"
                 )
             except Exception:
-                pw_hash = "$2b$12$KL28nM/uZoBhjkgTjMq7uuvenTylq3yPf5SRBYwMsrvITJRxfrINi"
+                pw_hash = "$2b$12$T2LBSAUwBwqe04QxeF18QO5OMZZdSRYg0Ux8mv5xT3T/rg0hKOlym"
 
             try:
                 import bcrypt
