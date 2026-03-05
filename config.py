@@ -1,14 +1,27 @@
 """
 K-Content YouTube Shorts Automation - 설정 관리
-모든 API 키와 설정값을 .env에서 로드하여 중앙 관리한다.
+로컬: .env 파일에서 로드
+Streamlit Cloud: st.secrets에서 로드 (fallback)
 """
 
 import os
 from pathlib import Path
 from dotenv import load_dotenv
 
-# .env 로드
+# .env 로드 (로컬 개발용)
 load_dotenv()
+
+
+def _get(key: str, default: str = "") -> str:
+    """로컬 .env 또는 Streamlit Cloud secrets에서 값 읽기"""
+    val = os.getenv(key, "")
+    if val:
+        return val
+    try:
+        import streamlit as st
+        return st.secrets.get(key, default)
+    except Exception:
+        return default
 
 # ── 경로 설정 ──
 BASE_DIR = Path(__file__).parent
@@ -16,20 +29,25 @@ OUTPUT_DIR = BASE_DIR / os.getenv("OUTPUT_DIR", "output")
 CREDENTIALS_DIR = BASE_DIR / "credentials"
 
 # ── OpenAI ──
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+OPENAI_API_KEY = _get("OPENAI_API_KEY")
 LLM_MODEL = "gpt-4o"
-TTS_MODEL = os.getenv("TTS_MODEL", "tts-1-hd")
-TTS_VOICE = os.getenv("TTS_VOICE", "coral")
-TTS_SPEED = float(os.getenv("TTS_SPEED", "1.15"))
+TTS_MODEL = _get("TTS_MODEL") or "tts-1-hd"
+TTS_VOICE = _get("TTS_VOICE") or "coral"
+TTS_SPEED = float(_get("TTS_SPEED") or "1.25")
 WHISPER_MODEL = "whisper-1"
 
 # ── Gemini ──
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-GEMINI_IMAGE_MODEL = os.getenv("GEMINI_IMAGE_MODEL", "gemini-2.5-flash-image")
+GEMINI_API_KEY = _get("GEMINI_API_KEY")
+GEMINI_IMAGE_MODEL = _get("GEMINI_IMAGE_MODEL") or "gemini-2.5-flash-image"
 
 # ── YouTube ──
-_yt_secret_raw = os.getenv("YOUTUBE_CLIENT_SECRET", "credentials/youtube_oauth.json")
+_yt_secret_raw = _get("YOUTUBE_CLIENT_SECRET") or "credentials/youtube_oauth.json"
 YOUTUBE_CLIENT_SECRET = str(BASE_DIR / _yt_secret_raw) if not os.path.isabs(_yt_secret_raw) else _yt_secret_raw
+
+# ── YouTube OAuth (클라우드 배포용 refresh token 방식) ──
+YOUTUBE_REFRESH_TOKEN = _get("YOUTUBE_REFRESH_TOKEN")
+YOUTUBE_OAUTH_CLIENT_ID = _get("YOUTUBE_OAUTH_CLIENT_ID")
+YOUTUBE_OAUTH_CLIENT_SECRET = _get("YOUTUBE_OAUTH_CLIENT_SECRET")
 UPLOAD_PRIVACY = os.getenv("UPLOAD_PRIVACY", "private")
 
 # ── 파이프라인 설정 ──
@@ -37,7 +55,7 @@ DRY_RUN = os.getenv("DRY_RUN", "false").lower() == "true"
 MAX_DAILY_VIDEOS = int(os.getenv("MAX_DAILY_VIDEOS", "2"))
 
 # ── 콘텐츠 설정 ──
-SCRIPT_WORD_COUNT = (130, 140)  # 55~60초 분량 영문 내레이션 (135wpm 기준)
+SCRIPT_WORD_COUNT = (90, 100)  # 약 40~45초 분량 영문 내레이션 (빠른 속도용)
 VIDEO_RESOLUTION = (1080, 1920)  # 9:16 세로 (width, height)
 VIDEO_FPS = 30
 VIDEO_MAX_DURATION = 60  # 초
@@ -52,8 +70,10 @@ RSS_FEEDS = [
 
 # ── yt-dlp 설정 ──
 YTDLP_MAX_RESULTS = 5       # 검색 시 최대 결과 수
-YTDLP_CLIP_DURATION = 5     # 클립 추출 길이 (초)
+YTDLP_CLIP_DURATION = 8     # 클립 추출 길이 (초)
 YTDLP_FORMAT = "bestvideo[height<=1080]+bestaudio/best[height<=1080]"
+ASSET_VIDEO_TARGET = 10     # 영상 에셋 목표 개수
+ASSET_IMAGE_TARGET = 10     # 이미지 에셋 목표 개수
 
 # ── 영상 편집 설정 ──
 CROSSFADE_DURATION = 0.4     # 씬 전환 페이드 (초)

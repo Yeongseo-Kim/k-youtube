@@ -222,16 +222,17 @@ def run(output_dir: Path, audio_path: Path, assets_dir: Path, subtitle_path: Pat
     total_duration = min(audio.duration, config.VIDEO_MAX_DURATION)
     console.print(f"  [dim]오디오 길이: {total_duration:.1f}초[/dim]")
 
-    # 2. 에셋 파일 목록 수집
+    # 2. 에셋 파일 목록 수집 (scene_XX 파일만 — pool_* 제외)
     asset_files = sorted([
         f for f in assets_dir.iterdir()
         if f.suffix.lower() in [".mp4", ".mov", ".jpg", ".jpeg", ".png", ".webp"]
+        and f.stem.startswith("scene_")
     ])
 
     if not asset_files:
         raise FileNotFoundError(f"에셋 파일이 없습니다: {assets_dir}")
 
-    console.print(f"  [dim]{len(asset_files)}개 에셋으로 영상 구성[/dim]")
+    console.print(f"  [dim]{len(asset_files)}개 씬 에셋으로 영상 구성[/dim]")
 
     # 3. 썸네일 준비 (씬과 동일 비중으로 분배)
     thumbnail_path = output_dir / "thumbnail.png"

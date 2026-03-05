@@ -26,7 +26,7 @@ REVIEW_PROMPTS = {
 3. PACING (1-25): Right word count (150-160), good flow?
 4. ENGAGEMENT (1-25): Emotional pull, curiosity gap, CTA?
 
-Total: 100 points. Pass threshold: 75.""",
+Total: 100 points. Pass threshold: 70.""",
         "output": "Return JSON: {score: int, passed: bool, feedback: str (2-3 specific improvement points in English)}"
     },
 

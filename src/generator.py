@@ -118,6 +118,103 @@ def fetch_korean_news_context(query: str, max_articles: int = 3) -> tuple[str, l
         return f"뉴스 검색 실패: {e}", []
 
 
+def fetch_web_snippets_context(query: str, max_articles: int = 4) -> str:
+    """DuckDuckGo HTML 검색 결과의 URL을 순회하며 각 페이지의 본문 전문을 수집한다.
+    
+    스니펫 대신 실제 페이지에 접속해 본문을 추출하므로, 잡지·공식 보도자료·SNS 링크 등에서
+    충분한 팩트를 가져올 수 있다.
+    """
+    import re
+    if not query:
+        return ""
+
+    encoded_query = urllib.parse.quote(query)
+    search_url = f"https://html.duckduckgo.com/html/?q={encoded_query}"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+        "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+    }
+
+    # ── 차단할 도메인 (SNS 로그인 장벽, 광고 등)
+    BLOCKED_DOMAINS = {
+        "instagram.com", "twitter.com", "x.com", "facebook.com",
+        "tiktok.com", "youtube.com", "youtu.be",
+        "duckduckgo.com", "google.com", "naver.com",
+    }
+
+    try:
+        import requests
+        resp = requests.get(search_url, headers=headers, timeout=10)
+        soup = BeautifulSoup(resp.text, "html.parser")
+
+        # DuckDuckGo 결과에서 실제 외부 URL 추출 (//duckduckgo.com/l/?uddg=... 우회)
+        raw_links = soup.select(".result__url")
+        result_links = soup.select("a.result__a")
+        
+        urls = []
+        for a in result_links:
+            href = a.get("href", "")
+            # DuckDuckGo redirect URL에서 실제 URL 파싱
+            if "uddg=" in href:
+                parsed = urllib.parse.parse_qs(urllib.parse.urlparse(href).query)
+                real = parsed.get("uddg", [""])[0]
+                if real:
+                    href = urllib.parse.unquote(real)
+            if href.startswith("http"):
+                domain = urllib.parse.urlparse(href).netloc.replace("www.", "")
+                if not any(blocked in domain for blocked in BLOCKED_DOMAINS):
+                    if href not in urls:
+                        urls.append(href)
+
+        console.print(f"  [dim]🌐 웹 전문 수집 대상 URL {len(urls)}개[/dim]")
+
+        # ── 각 URL 방문해서 본문 추출
+        articles = []
+        for url in urls[:max_articles]:
+            try:
+                ar = requests.get(url, headers=headers, timeout=8, allow_redirects=True)
+                ar.raise_for_status()
+                asoup = BeautifulSoup(ar.text, "html.parser")
+
+                # 노이즈 제거
+                for tag in asoup.select("script, style, nav, footer, header, aside, .ad, .advertisement, .popup"):
+                    tag.decompose()
+
+                # 본문 후보 선정 (넓->좁 순서)
+                body_elem = (
+                    asoup.select_one("article")
+                    or asoup.select_one("main")
+                    or asoup.select_one(".article-body, .article_body, .content, .post-content, .entry-content")
+                    or asoup.select_one("#content, #article, #main")
+                    or asoup.select_one("body")
+                )
+
+                if not body_elem:
+                    continue
+
+                raw_text = body_elem.get_text(separator="\n", strip=True)
+                # 빈 줄 압축
+                cleaned = re.sub(r'\n{3,}', '\n\n', raw_text).strip()[:2500]
+
+                if len(cleaned) < 100:
+                    continue
+
+                domain_label = urllib.parse.urlparse(url).netloc.replace("www.", "")
+                articles.append(f"[출처: {domain_label}]\n{cleaned}")
+                console.print(f"  [green]  ✓ 전문 수집: {domain_label} ({len(cleaned)}자)[/green]")
+
+            except Exception as e:
+                console.print(f"  [yellow]  ⚠ URL 접근 실패 ({url[:60]}...): {e}[/yellow]")
+
+        if articles:
+            return "\n\n".join(f"[웹 글 전문 {i+1}]\n{a}" for i, a in enumerate(articles))
+
+        return ""
+    except Exception as e:
+        console.print(f"[yellow]⚠ 덕덕고 검색 오류: {e}[/yellow]")
+        return ""
+
+
 def generate_script_and_plan(topic: dict, feedback: str = "") -> dict:
     """GPT-4o로 대본 + 에셋 플랜 + 메타데이터를 한 번에 생성"""
     client = OpenAI(api_key=config.OPENAI_API_KEY)
@@ -177,6 +274,11 @@ def generate_script_and_plan(topic: dict, feedback: str = "") -> dict:
             for a in news_articles
         )
 
+    # + 추가: 웹/소셜 글 (잡지, 인스타 PR 등) 스니펫 수집
+    web_context = fetch_web_snippets_context(primary_query, max_articles=6)
+    if web_context:
+        news_context += f"\n\n{web_context}"
+
     prompt = f"""You are a viral YouTube Shorts creator who has 5M+ subscribers covering K-pop and K-drama.
 Your audience is passionate international K-fans aged 15-28. They're deeply invested in idol culture.
 
@@ -187,7 +289,7 @@ Keywords: {', '.join(topic.get('keywords', []))}
 Why it's viral: {topic.get('why_viral', '')}
 
 ════════════════════════════════════════
-REAL KOREAN NEWS CONTEXT (Must base facts on this):
+REAL KOREAN NEWS & WEB CONTEXT (Must base facts on this):
 ════════════════════════════════════════
 {news_context}
 
@@ -201,7 +303,7 @@ CONTENT GUIDELINES — READ CAREFULLY:
    Do NOT sound like a rigid news reporter. Keep it heartfelt but purely informational.
    [CTA]: End exactly with this or a close variation: "Follow and leave a supportive comment!"
 
-✅ CONTENT: Base everything STRICTLY on the "REAL KOREAN NEWS CONTEXT":
+✅ CONTENT: Base everything STRICTLY on the "REAL KOREAN NEWS & WEB CONTEXT":
    - Weave the facts together into a single, logical, and chronological story.
    - FATAL ERROR if you include generic filler sentences like "Fans are taking to social media to celebrate." or "The K-pop community is sending love."
    - DO NOT include ANY sentence that does not contain a specific proper noun, date, number, or direct quote from the news.
@@ -217,7 +319,7 @@ OUTPUT FORMAT (JSON):
 ════════════════════════════════════════
 
 1. "script": Exactly {min_words}-{max_words} words (MINIMUM {min_words} words — never shorter). Structure:
-   [HOOK - 1-2 sentences] Opening fact based entirely on the news.
+   [HOOK - 1-2 sentences] MUST BE INCREDIBLY STRONG, DRAMATIC, OR EMOTIONAL. Grab the viewer instantly with a shocking, surprising, or heartwarming fact. Do NOT just state the news; make it a "you won't believe this" moment.
    [DETAIL 1 - 2-3 sentences] Next hard fact/chronological event from the news. NO FILLER.
    [DETAIL 2 - 2-3 sentences] Additional details (quotes, numbers, specific context) from the news. NO FILLER.
    [CTA - 1 sentence] "Follow and leave a supportive comment!"

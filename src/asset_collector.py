@@ -1,10 +1,17 @@
 """
-[모듈 3] 에셋 수집
+[모듈 3] 에셋 수집 — 3층 필터 + 영상10/이미지10 분리 수집
+
+3층 필터:
+  1층: 범용 키워드 차단 (reaction, cover, FMV 등 → 검색 단계에서 즉시 제외)
+  2층: GPT 채널 분류 (official/media/fan → fan 제외)
+  3층: 이미지 안전 폴백 (공식 영상 부족 시 뉴스 이미지로 대체)
 
 흐름:
-  1. 네이버 뉴스 기사에서 이미지 전부 크롤링 → 이미지 풀 생성
-  2. GPT-4o Vision이 씬 설명 보고 배치 (중복 없이)
-  3. 빈 씬만 yt-dlp로 짧은 한국어 키워드 검색 (e.g. "초아 쌍둥이")
+  ① YouTube 검색 → 메타데이터 수집 (다운로드 없이)
+  ② 1층 키워드 필터 → 2층 GPT 채널/적합성 판단
+  ③ official/media만 다운로드 (최대 10개)
+  ④ 뉴스/검색 이미지 별도 수집 (최대 10개)
+  ⑤ 전체 풀 asset_pool.json 저장 + AI 씬 자동 배치
 """
 
 import json
@@ -21,511 +28,640 @@ import config
 
 console = Console()
 
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 1층 필터: 범용 차단 키워드 (모든 토픽에 적용)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-# ── 1. 네이버 뉴스 이미지 크롤링 ────────────────────────────
+BLOCKED_TITLE_KEYWORDS = [
+    "reaction", "react", "cover", "dance cover", "fmv", "edit",
+    "compilation", "tutorial", "fan", "fanmade", "fan made",
+    "ranking", "tier list", "unpacking", "unboxing",
+    "리액션", "커버", "팬메이드", "가사해석", "해석", "자막",
+    "언박싱", "따라하기", "커버댄스",
+]
+
+
+def _is_blocked_by_keywords(title: str, description: str) -> bool:
+    """1층 필터: 제목/설명에 차단 키워드가 있으면 True"""
+    text = (title + " " + description).lower()
+    return any(kw in text for kw in BLOCKED_TITLE_KEYWORDS)
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# YouTube 메타데이터 수집
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+def search_youtube_metadata(queries: list[str], max_per_query: int = 5) -> list[dict]:
+    """yt-dlp로 YouTube 검색 → 다운로드 없이 메타데이터만 수집 + 1층 필터 적용"""
+    seen_urls: set[str] = set()
+    results: list[dict] = []
+
+    for query in queries:
+        try:
+            cmd = [
+                "yt-dlp",
+                f"ytsearch{max_per_query}:{query}",
+                "--print", "%(title)s|||%(description).200s|||%(channel)s|||%(view_count)s|||%(duration)s|||%(webpage_url)s",
+                "--no-download",
+                "--quiet",
+                "--no-warnings",
+            ]
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            if proc.returncode != 0:
+                continue
+
+            for line in proc.stdout.strip().split("\n"):
+                if not line.strip():
+                    continue
+                parts = line.split("|||")
+                if len(parts) < 6:
+                    continue
+                url = parts[5].strip()
+                if url in seen_urls:
+                    continue
+
+                title = parts[0].strip()
+                desc = parts[1].strip()
+
+                # ── 1층 필터: 키워드 차단 ──
+                if _is_blocked_by_keywords(title, desc):
+                    console.print(f"  [dim]  ✗ 키워드 차단: {title[:50]}[/dim]")
+                    continue
+
+                seen_urls.add(url)
+
+                try:
+                    view_count = int(parts[3].strip()) if parts[3].strip().isdigit() else 0
+                except ValueError:
+                    view_count = 0
+                try:
+                    duration = int(parts[4].strip()) if parts[4].strip().isdigit() else 0
+                except ValueError:
+                    duration = 0
+
+                results.append({
+                    "title": title,
+                    "description": desc,
+                    "channel": parts[2].strip(),
+                    "view_count": view_count,
+                    "duration": duration,
+                    "url": url,
+                    "query": query,
+                })
+
+            console.print(f"  [dim]YouTube '{query}': {sum(1 for r in results if r['query']==query)}개 통과[/dim]")
+
+        except (subprocess.TimeoutExpired, FileNotFoundError) as e:
+            console.print(f"  [yellow]⚠ YouTube 검색 실패 ({query}): {e}[/yellow]")
+
+    console.print(f"  [cyan]YouTube 메타데이터 총 {len(results)}개 (1층 필터 통과)[/cyan]")
+    return results
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 2층 필터: GPT 채널 분류 + 적합성 판단
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+def score_and_classify_videos(videos_meta: list[dict], topic: dict, scenes: list[dict]) -> list[dict]:
+    """GPT-4o-mini로 채널 유형 분류 + 적합성 점수.
+    
+    채널 유형:
+      - official: 소속사, 아티스트 본인, 방송사 공식 채널
+      - media: 뉴스/언론사 채널
+      - fan: 팬 채널, 개인 채널, 리뷰어
+    
+    fan 채널은 자동으로 낮은 점수를 받아 제외됨.
+    """
+    if not videos_meta:
+        return []
+
+    client = OpenAI(api_key=config.OPENAI_API_KEY)
+
+    scenes_text = "\n".join(
+        f"  scene_{s['scene_id']}: {s['description']}" for s in scenes
+    )
+
+    videos_text = "\n".join(
+        f"  V{i+1}: title=\"{v['title']}\", channel=\"{v['channel']}\", "
+        f"views={v['view_count']:,}, duration={v['duration']}s, "
+        f"desc=\"{v['description'][:80]}\""
+        for i, v in enumerate(videos_meta)
+    )
+
+    prompt = f"""You are a K-content video asset curator. Classify and score YouTube videos.
+
+TOPIC: {topic.get('headline', '')}
+TOPIC_KO: {topic.get('headline_ko', '')}
+
+SCENES:
+{scenes_text}
+
+VIDEOS:
+{videos_text}
+
+For each video, determine:
+1. channel_type: "official" (agency, broadcaster, artist) | "media" (news channel) | "fan" (personal, fan channel, reviewer)
+2. score (1-10):
+   - official channels: base 7-10
+   - media channels: base 5-8
+   - fan channels: MAX 2 (we don't want fan content)
+   - Perfect topic match → higher score
+   - Reaction/commentary → score 1
+3. best matching scene_id (int or null)
+
+Return JSON: {{"scores": [{{"idx": 1, "channel_type": "official", "score": 9, "reason": "...", "scene_id": 2}}, ...]}}"""
+
+    try:
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            response_format={"type": "json_object"},
+            temperature=0.2,
+        )
+        result = json.loads(resp.choices[0].message.content)
+        scores = result.get("scores", [])
+
+        for score_info in scores:
+            idx = score_info.get("idx", 0) - 1
+            if 0 <= idx < len(videos_meta):
+                videos_meta[idx]["relevance_score"] = score_info.get("score", 0)
+                videos_meta[idx]["channel_type"] = score_info.get("channel_type", "fan")
+                videos_meta[idx]["relevance_reason"] = score_info.get("reason", "")
+                videos_meta[idx]["recommended_scene"] = score_info.get("scene_id", None)
+
+        for v in videos_meta:
+            v.setdefault("relevance_score", 0)
+            v.setdefault("channel_type", "unknown")
+            v.setdefault("relevance_reason", "미분류")
+            v.setdefault("recommended_scene", None)
+
+        # fan 채널은 강제 2점 이하
+        for v in videos_meta:
+            if v["channel_type"] == "fan" and v["relevance_score"] > 2:
+                v["relevance_score"] = 2
+                v["relevance_reason"] += " (fan 채널 감점)"
+
+        # 점수 내림차순 정렬
+        videos_meta.sort(key=lambda x: x.get("relevance_score", 0), reverse=True)
+
+        top = videos_meta[0] if videos_meta else {}
+        console.print(
+            f"  [green]✓ GPT 분류 완료 — "
+            f"official: {sum(1 for v in videos_meta if v['channel_type']=='official')}, "
+            f"media: {sum(1 for v in videos_meta if v['channel_type']=='media')}, "
+            f"fan: {sum(1 for v in videos_meta if v['channel_type']=='fan')}[/green]"
+        )
+        if top:
+            console.print(f"  [green]  상위: [{top.get('channel_type','')}] {top['title'][:40]} = {top['relevance_score']}/10[/green]")
+
+        return videos_meta
+
+    except Exception as e:
+        console.print(f"  [yellow]⚠ GPT 분류 실패: {e} — 조회수 기준 폴백[/yellow]")
+        videos_meta.sort(key=lambda x: x.get("view_count", 0), reverse=True)
+        for v in videos_meta:
+            v["relevance_score"] = 5
+            v["channel_type"] = "unknown"
+            v["relevance_reason"] = "폴백"
+            v["recommended_scene"] = None
+        return videos_meta
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 영상 다운로드
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+def download_official_videos(
+    scored_videos: list[dict],
+    assets_dir: Path,
+    min_score: int = 5,
+    max_count: int = 10,
+) -> list[dict]:
+    """official/media 채널 영상만 점수 순으로 다운로드."""
+    downloaded: list[dict] = []
+    duration = config.YTDLP_CLIP_DURATION
+
+    for v in scored_videos:
+        if len(downloaded) >= max_count:
+            break
+        if v.get("relevance_score", 0) < min_score:
+            continue
+        if v.get("channel_type") == "fan":
+            continue
+
+        idx = len(downloaded) + 1
+        output_path = assets_dir / f"pool_video_{idx:02d}.mp4"
+
+        try:
+            cmd = [
+                "yt-dlp", v["url"],
+                "--format", "bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4][height<=1080]/best[height<=1080]",
+                "--merge-output-format", "mp4",
+                "--download-sections", f"*0-{duration}",
+                "--output", str(output_path),
+                "--no-playlist", "--quiet", "--no-warnings",
+            ]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            if result.returncode == 0 and output_path.exists() and output_path.stat().st_size > 10000:
+                downloaded.append({
+                    "path": str(output_path),
+                    "type": "video",
+                    "title": v["title"],
+                    "channel": v["channel"],
+                    "channel_type": v.get("channel_type", "unknown"),
+                    "score": v.get("relevance_score", 0),
+                    "reason": v.get("relevance_reason", ""),
+                    "recommended_scene": v.get("recommended_scene"),
+                    "url": v["url"],
+                })
+                type_icon = {"official": "🏢", "media": "📰"}.get(v.get("channel_type"), "❓")
+                console.print(f"  [green]  ✓ {type_icon} [{v.get('relevance_score',0)}/10] {v['channel']}: {v['title'][:45]}[/green]")
+            else:
+                output_path.unlink(missing_ok=True)
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            output_path.unlink(missing_ok=True)
+
+    console.print(f"  [cyan]영상 {len(downloaded)}개 다운로드 완료[/cyan]")
+    return downloaded
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 이미지 수집 (뉴스 + 검색)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 def _is_valid_img_url(src: str) -> bool:
-    """이미지 URL 유효성 체크 — 확장자 또는 신뢰 도메인 기반"""
     if not src.startswith("http"):
         return False
     has_ext = any(ext in src.lower() for ext in [".jpg", ".jpeg", ".png", ".webp"])
-    trusted_domain = any(d in src for d in ["imgnews.pstatic.net", "mimgnews.pstatic.net", "scs-phinf.pstatic.net"])
-    return has_ext or trusted_domain
+    trusted = any(d in src for d in ["imgnews.pstatic.net", "mimgnews.pstatic.net", "scs-phinf.pstatic.net"])
+    return has_ext or trusted
 
 
 def scrape_naver_article_images(article_url: str) -> list[str]:
-    """네이버 뉴스 기사 본문 + 관련 썸네일에서 이미지 URL 추출"""
     if not article_url:
         return []
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Accept-Language": "ko-KR,ko;q=0.9",
-    }
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36", "Accept-Language": "ko-KR,ko;q=0.9"}
     try:
         resp = requests.get(article_url, headers=headers, timeout=10)
         from bs4 import BeautifulSoup
         soup = BeautifulSoup(resp.text, "html.parser")
-
-        seen: set[str] = set()
-        urls: list[str] = []
-
-        def _collect_imgs(container):
+        seen, urls = set(), []
+        def _collect(container):
             for img in container.find_all("img"):
-                src = (
-                    img.get("data-src")
-                    or img.get("data-lazy-src")
-                    or img.get("src")
-                    or ""
-                )
-                # 로고/아이콘 제외 (comp_feed_source_thumb 클래스)
-                parent_class = " ".join(img.parent.get("class") or [])
-                if "source_thumb" in parent_class or "logo" in parent_class:
+                src = img.get("data-src") or img.get("data-lazy-src") or img.get("src") or ""
+                pc = " ".join(img.parent.get("class") or [])
+                if "source_thumb" in pc or "logo" in pc:
                     continue
                 if _is_valid_img_url(src) and src not in seen:
                     seen.add(src)
                     urls.append(src)
-
-        # ① 본문 영역 (대표 이미지)
-        for selector in ["#dic_area", "#newsct_article", ".newsct_article", "article"]:
-            body = soup.select_one(selector)
+        for sel in ["#dic_area", "#newsct_article", ".newsct_article", "article"]:
+            body = soup.select_one(sel)
             if body:
-                _collect_imgs(body)
+                _collect(body)
                 break
-
-        # ② .image_area / figure 추가 탐색
         for area in soup.select(".image_area, .article_body figure"):
-            _collect_imgs(area)
-
-        console.print(f"    [dim]이미지 URL 수집: {len(urls)}개[/dim]")
+            _collect(area)
         return urls
-
-    except Exception as e:
-        console.print(f"    [yellow]⚠ 기사 이미지 크롤링 실패: {e}[/yellow]")
-    return []
+    except Exception:
+        return []
 
 
-def collect_all_news_images(news_articles: list[dict], tmp_dir: Path) -> list[dict]:
-    """모든 뉴스 기사 이미지를 임시 폴더에 다운로드 → [{path, article_title, url}]"""
+def fetch_article_urls_from_naver(query: str, max_articles: int = 15) -> list[str]:
+    import urllib.parse
+    from bs4 import BeautifulSoup
+    encoded = urllib.parse.quote(query)
+    url = f"https://search.naver.com/search.naver?where=news&sort=1&query={encoded}"
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36", "Accept-Language": "ko-KR,ko;q=0.9"}
+    try:
+        resp = requests.get(url, headers=headers, timeout=10)
+        soup = BeautifulSoup(resp.text, "html.parser")
+        urls, seen = [], set()
+        for el in soup.find_all(attrs={"data-url": True}):
+            u = el.get("data-url", "").strip()
+            if u.startswith("http") and u not in seen:
+                seen.add(u)
+                urls.append(u)
+                if len(urls) >= max_articles:
+                    break
+        return urls
+    except Exception:
+        return []
+
+
+def collect_all_images(news_articles: list[dict], search_queries: list[str], assets_dir: Path, max_count: int = 10) -> list[dict]:
+    """뉴스 기사 + 네이버 검색에서 이미지 수집 (최대 max_count개)"""
     import re as _re
-    headers = {"User-Agent": "Mozilla/5.0"}
-    pool = []
+    headers_dl = {"User-Agent": "Mozilla/5.0"}
+    headers_page = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36", "Accept-Language": "ko-KR,ko;q=0.9"}
+    pool: list[dict] = []
+    seen_urls: set[str] = set()
+    img_idx = 0
 
+    # A: 뉴스 기사 이미지
     for article in news_articles:
-        # 한국어 비율 40% 미만 기사 건너뛰기 (영문 기사 이미지 차단)
+        if len(pool) >= max_count:
+            break
         title = article.get("title", "")
         body = article.get("body", "")
         text = title + body
-        korean_chars = len(_re.findall(r'[\uAC00-\uD7A3]', text))
-        if len(text) > 0 and korean_chars / len(text) < 0.4:
-            console.print(f"  [dim]기사 {article.get('index')}: 영문 기사 건너뜀[/dim]")
+        ko_chars = len(_re.findall(r'[\uAC00-\uD7A3]', text))
+        if len(text) > 0 and ko_chars / max(len(text), 1) < 0.4:
             continue
-        img_urls = scrape_naver_article_images(article.get("url", ""))
-        console.print(f"  [dim]기사 {article.get('index')}: {len(img_urls)}개 이미지 발견[/dim]")
-
-        for idx, img_url in enumerate(img_urls):
+        for img_url in scrape_naver_article_images(article.get("url", "")):
+            if len(pool) >= max_count or img_url in seen_urls:
+                continue
             try:
-                resp = requests.get(img_url, headers=headers, timeout=10)
+                resp = requests.get(img_url, headers=headers_dl, timeout=10)
                 resp.raise_for_status()
-                if len(resp.content) < 5000:   # 아이콘/광고 제외
+                if len(resp.content) < 5000:
                     continue
-
-                tmp_path = tmp_dir / f"article{article.get('index', 0)}_img{idx}.jpg"
-                tmp_path.write_bytes(resp.content)
-
-                # PIL로 열 수 있는지 검증
+                img_idx += 1
+                path = assets_dir / f"pool_image_{img_idx:02d}.jpg"
+                path.write_bytes(resp.content)
                 try:
-                    img = Image.open(tmp_path).convert("RGB")
+                    img = Image.open(path).convert("RGB")
                     w, h = img.size
-                    if w < 100 or h < 100:   # 너무 작은 이미지 제외
-                        tmp_path.unlink(missing_ok=True)
+                    if w < 100 or h < 100:
+                        path.unlink(missing_ok=True)
                         continue
-                    img.save(tmp_path, "JPEG", quality=90)
+                    img.save(path, "JPEG", quality=90)
                 except Exception:
-                    tmp_path.unlink(missing_ok=True)
+                    path.unlink(missing_ok=True)
                     continue
-
+                seen_urls.add(img_url)
                 pool.append({
-                    "path": tmp_path,
-                    "url": img_url,
-                    "article_title": article.get("title", ""),
+                    "path": str(path), "type": "image",
+                    "title": title, "channel": "", "channel_type": "media",
+                    "score": 6, "reason": "뉴스 기사 이미지",
+                    "recommended_scene": None, "url": img_url,
                 })
             except Exception:
                 continue
 
-    console.print(f"  [cyan]총 {len(pool)}개 뉴스 이미지 수집 완료[/cyan]")
-    return pool
-
-
-def fetch_article_urls_from_naver(query: str, max_articles: int = 15) -> list[str]:
-    """네이버 뉴스 검색 결과에서 data-url 속성으로 기사 URL 수집"""
-    import urllib.parse
-    from bs4 import BeautifulSoup
-
-    encoded_query = urllib.parse.quote(query)
-    search_url = f"https://search.naver.com/search.naver?where=news&sort=1&query={encoded_query}"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-        "Accept-Language": "ko-KR,ko;q=0.9",
-    }
-    try:
-        resp = requests.get(search_url, headers=headers, timeout=10)
-        soup = BeautifulSoup(resp.text, "html.parser")
-
-        urls: list[str] = []
-        seen: set[str] = set()
-        # 네이버 검색은 JS 렌더링 → a href 대신 data-url 속성에 원본 URL
-        for el in soup.find_all(attrs={"data-url": True}):
-            url = el.get("data-url", "").strip()
-            if url.startswith("http") and url not in seen:
-                seen.add(url)
-                urls.append(url)
-                if len(urls) >= max_articles:
-                    break
-
-        console.print(f"  [dim]네이버 검색 '{query}': 기사 {len(urls)}개 URL 수집[/dim]")
-        return urls
-    except Exception as e:
-        console.print(f"  [yellow]⚠ 네이버 검색 URL 수집 실패: {e}[/yellow]")
-        return []
-
-
-def collect_images_from_search(query: str, tmp_dir: Path, max_articles: int = 15) -> list[dict]:
-    """네이버 검색 결과 기사들에서 og:image 대표 이미지 크롤링 → [{path, url, article_title}]"""
-    article_urls = fetch_article_urls_from_naver(query, max_articles=max_articles)
-    if not article_urls:
-        return []
-
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Accept-Language": "ko-KR,ko;q=0.9",
-    }
-    dl_headers = {"User-Agent": "Mozilla/5.0"}
-    pool: list[dict] = []
-
-    for art_idx, article_url in enumerate(article_urls):
-        try:
-            resp = requests.get(article_url, headers=headers, timeout=10, allow_redirects=True)
-            from bs4 import BeautifulSoup
-            soup = BeautifulSoup(resp.text, "html.parser")
-
-            # og:image 우선 (언론사 대표 이미지)
-            og = soup.find("meta", property="og:image")
-            img_url = og.get("content", "").strip() if og else ""
-
-            if not img_url or not img_url.startswith("http"):
-                continue
-
-            img_resp = requests.get(img_url, headers=dl_headers, timeout=10)
-            img_resp.raise_for_status()
-            if len(img_resp.content) < 5000:
-                continue
-
-            tmp_path = tmp_dir / f"search{art_idx}.jpg"
-            tmp_path.write_bytes(img_resp.content)
-
+    # B: 네이버 검색 추가 이미지
+    for query in search_queries:
+        if len(pool) >= max_count:
+            break
+        for art_url in fetch_article_urls_from_naver(query, max_articles=10):
+            if len(pool) >= max_count:
+                break
             try:
-                img = Image.open(tmp_path).convert("RGB")
-                w, h = img.size
-                if w < 100 or h < 100:
-                    tmp_path.unlink(missing_ok=True)
+                resp = requests.get(art_url, headers=headers_page, timeout=10, allow_redirects=True)
+                from bs4 import BeautifulSoup
+                soup = BeautifulSoup(resp.text, "html.parser")
+                og = soup.find("meta", property="og:image")
+                img_url = og.get("content", "").strip() if og else ""
+                if not img_url or not img_url.startswith("http") or img_url in seen_urls:
                     continue
-                img.save(tmp_path, "JPEG", quality=90)
+                img_resp = requests.get(img_url, headers=headers_dl, timeout=10)
+                img_resp.raise_for_status()
+                if len(img_resp.content) < 5000:
+                    continue
+                img_idx += 1
+                path = assets_dir / f"pool_image_{img_idx:02d}.jpg"
+                path.write_bytes(img_resp.content)
+                try:
+                    img = Image.open(path).convert("RGB")
+                    if img.size[0] < 100 or img.size[1] < 100:
+                        path.unlink(missing_ok=True)
+                        continue
+                    img.save(path, "JPEG", quality=90)
+                except Exception:
+                    path.unlink(missing_ok=True)
+                    continue
+                seen_urls.add(img_url)
+                pool.append({
+                    "path": str(path), "type": "image",
+                    "title": art_url[:60], "channel": "", "channel_type": "media",
+                    "score": 5, "reason": "검색 이미지",
+                    "recommended_scene": None, "url": img_url,
+                })
             except Exception:
-                tmp_path.unlink(missing_ok=True)
                 continue
 
-            pool.append({"path": tmp_path, "url": img_url, "article_title": article_url})
-        except Exception:
-            continue
-
-    console.print(f"  [cyan]검색 기반 이미지: {len(pool)}개 수집[/cyan]")
+    console.print(f"  [cyan]이미지 {len(pool)}개 수집 완료[/cyan]")
     return pool
 
 
-# ── 2. GPT-4o Vision 씬 배치 ─────────────────────────────────
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# AI 씬 자동 배치
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-def ai_assign_images(image_pool: list[dict], scenes: list[dict]) -> dict[int, Path]:
-    """
-    GPT-4o Vision으로 이미지 풀을 씬에 배치.
-    Returns: {scene_id: image_path}  (배치된 씬만 포함)
-    """
-    if not image_pool:
+def ai_assign_pool_to_scenes(asset_pool: list[dict], scenes: list[dict]) -> dict[int, int]:
+    """에셋 풀을 씬에 자동 배치. Returns: {scene_id: pool_index}"""
+    if not asset_pool or not scenes:
         return {}
 
-    client = OpenAI(api_key=config.OPENAI_API_KEY)
-    scenes_text = "\n".join(
-        f"scene_{s['scene_id']}: {s['description']}" for s in scenes
-    )
+    assignments: dict[int, int] = {}
+    used_pool: set[int] = set()
 
-    # 메시지 구성 — 이미지들 + 지시문
-    content = [{
-        "type": "text",
-        "text": (
-            f"You have {len(image_pool)} images (Image_1 ~ Image_{len(image_pool)}) "
-            f"and {len(scenes)} scenes below.\n\n"
-            f"Scenes:\n{scenes_text}\n\n"
-            "Assign each image to the most relevant scene. "
-            "Each scene can receive at most ONE image. "
-            "If an image is not relevant to any scene, assign 'none'.\n"
-            "Return ONLY valid JSON like: "
-            "{\"assignments\": {\"Image_1\": \"scene_2\", \"Image_2\": \"none\", ...}}"
-        ),
-    }]
+    # 1차: recommended_scene 기반 (영상 우선, 점수 높은 순)
+    sorted_pool = sorted(enumerate(asset_pool), key=lambda x: x[1].get("score", 0), reverse=True)
+    for pool_idx, asset in sorted_pool:
+        rec = asset.get("recommended_scene")
+        if rec and isinstance(rec, int) and rec not in assignments and pool_idx not in used_pool:
+            assignments[rec] = pool_idx
+            used_pool.add(pool_idx)
 
-    for i, img_info in enumerate(image_pool, 1):
+    # 2차: GPT 텍스트 매칭
+    missing = [s for s in scenes if s["scene_id"] not in assignments]
+    remaining = [(i, a) for i, a in enumerate(asset_pool) if i not in used_pool]
+
+    if missing and remaining:
         try:
-            with open(img_info["path"], "rb") as f:
-                b64 = base64.b64encode(f.read()).decode()
-            content.append({
-                "type": "image_url",
-                "image_url": {"url": f"data:image/jpeg;base64,{b64}", "detail": "low"},
-            })
-            content.append({"type": "text", "text": f"Image_{i}"})
-        except Exception:
-            continue
+            client = OpenAI(api_key=config.OPENAI_API_KEY)
+            scenes_text = "\n".join(f"scene_{s['scene_id']}: {s['description']}" for s in missing)
+            pool_text = "\n".join(
+                f"A{i}: [{a['type']}] {a['title'][:50]} (score:{a.get('score',0)})"
+                for i, a in remaining
+            )
+            resp = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content":
+                    f"Match scenes to assets. Prefer video over image when scores are similar.\n\n"
+                    f"Scenes:\n{scenes_text}\n\nAssets:\n{pool_text}\n\n"
+                    f"Return JSON: {{\"assignments\": {{\"scene_ID\": \"A_IDX\", ...}}}}. Use 'none' if no match."}],
+                response_format={"type": "json_object"}, temperature=0.2,
+            )
+            result = json.loads(resp.choices[0].message.content)
+            for sk, ak in result.get("assignments", {}).items():
+                if ak == "none":
+                    continue
+                try:
+                    sid = int(str(sk).split("_")[-1]) if "_" in str(sk) else int(sk)
+                    aidx = int(str(ak).split("_")[-1]) if "_" in str(ak) else int(ak)
+                    if sid not in assignments and aidx not in used_pool:
+                        assignments[sid] = aidx
+                        used_pool.add(aidx)
+                except (ValueError, IndexError):
+                    continue
+        except Exception as e:
+            console.print(f"  [yellow]⚠ AI 배치 실패: {e}[/yellow]")
 
-    try:
-        resp = client.chat.completions.create(
-            model="gpt-4o",
-            messages=[{"role": "user", "content": content}],
-            response_format={"type": "json_object"},
-            max_tokens=500,
-        )
-        result = json.loads(resp.choices[0].message.content)
-        assignments = result.get("assignments", {})
-
-        assigned: dict[int, Path] = {}
-        used_img_indices: set[int] = set()
-        for img_key, scene_key in assignments.items():
-            if scene_key == "none":
-                continue
-            try:
-                img_idx = int(img_key.split("_")[1]) - 1
-                scene_id = int(scene_key.split("_")[1])
-                # 씬당 1개 + 이미지당 1회만 사용 (중복 방지)
-                if scene_id not in assigned and img_idx not in used_img_indices:
-                    assigned[scene_id] = image_pool[img_idx]["path"]
-                    used_img_indices.add(img_idx)
-            except (ValueError, IndexError):
-                continue
-
-        console.print(f"  [green]✓ AI 이미지 배치: {len(assigned)}개 씬 매칭[/green]")
-        return assigned
-
-    except Exception as e:
-        console.print(f"  [yellow]⚠ AI 배치 실패: {e}[/yellow]")
-        return {}
+    console.print(f"  [green]✓ AI 배치: {len(assignments)}/{len(scenes)}개 씬[/green]")
+    return assignments
 
 
-# ── 3. yt-dlp 유튜브 검색 (짧은 한국어 키워드) ──────────────
-
-def get_topic_keywords(output_dir: Path) -> list[str]:
-    """trending_topics.json에서 짧은 한국어 YouTube 검색 키워드 추출"""
-    import re
-    state_path = output_dir / "pipeline_state.json"
-    topics_path = output_dir / "trending_topics.json"
-
-    keywords = []
-    try:
-        # 선택된 토픽 가져오기
-        if state_path.exists() and topics_path.exists():
-            state = json.loads(state_path.read_text(encoding="utf-8"))
-            topics = json.loads(topics_path.read_text(encoding="utf-8"))
-            idx = state.get("results", {}).get("selected_topic_index", 0)
-            topic = topics[idx] if 0 <= idx < len(topics) else topics[0]
-        elif topics_path.exists():
-            topics = json.loads(topics_path.read_text(encoding="utf-8"))
-            topic = max(topics, key=lambda t: t.get("virality_score", 0))
-        else:
-            return []
-
-        headline_ko = topic.get("headline_ko", "")
-        words = re.sub(r'[!?,.\[\]()「」『』【】…~·]', ' ', headline_ko).split()
-
-        # 2단어씩 슬라이딩 (e.g. "크레용팝 초아", "초아 쌍둥이")
-        for i in range(len(words) - 1):
-            kw = f"{words[i]} {words[i+1]}"
-            if kw not in keywords:
-                keywords.append(kw)
-        # 단독 단어도 추가 (이름 등)
-        for w in words:
-            if len(w) >= 2 and w not in keywords:
-                keywords.append(w)
-
-    except Exception as e:
-        console.print(f"  [yellow]⚠ 키워드 추출 실패: {e}[/yellow]")
-
-    return keywords
-
-
-def download_youtube_clip(query: str, output_path: Path, duration: int = None) -> bool:
-    """yt-dlp로 유튜브 검색 → 클립 다운로드"""
-    duration = duration or config.YTDLP_CLIP_DURATION
-    try:
-        cmd = [
-            "yt-dlp",
-            f"ytsearch1:{query}",
-            "--format", "bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4][height<=1080]/best[height<=1080]",
-            "--merge-output-format", "mp4",
-            "--download-sections", f"*0-{duration}",
-            "--output", str(output_path),
-            "--no-playlist",
-            "--quiet",
-            "--no-warnings",
-        ]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-        if result.returncode == 0 and output_path.exists():
-            console.print(f"    [green]✓ yt-dlp 성공: {query}[/green]")
-            return True
-        return False
-    except (subprocess.TimeoutExpired, FileNotFoundError):
-        return False
-
-
-# ── 이미지 후처리 ─────────────────────────────────────────────
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 이미지 후처리
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 def crop_to_portrait(image_path: Path):
-    """이미지를 9:16 비율로 center crop"""
     try:
         img = Image.open(image_path).convert("RGB")
         w, h = img.size
-        target_ratio = 9 / 16
-        current_ratio = w / h
-
-        if current_ratio > target_ratio:
-            new_w = int(h * target_ratio)
-            left = (w - new_w) // 2
-            img = img.crop((left, 0, left + new_w, h))
-        elif abs(current_ratio - target_ratio) > 0.05:
-            new_h = int(w / target_ratio)
-            top = (h - new_h) // 2
-            img = img.crop((0, top, w, top + new_h))
-
+        tr = 9 / 16
+        cr = w / h
+        if cr > tr:
+            nw = int(h * tr)
+            left = (w - nw) // 2
+            img = img.crop((left, 0, left + nw, h))
+        elif abs(cr - tr) > 0.05:
+            nh = int(w / tr)
+            top = (h - nh) // 2
+            img = img.crop((0, top, w, top + nh))
         img = img.resize(config.VIDEO_RESOLUTION, Image.LANCZOS)
         img.save(image_path, "JPEG", quality=90)
     except Exception as e:
         console.print(f"    [yellow]크롭 오류: {e}[/yellow]")
 
 
-# ── 메인 실행 ─────────────────────────────────────────────────
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 검색어 생성
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+def build_search_queries(topic: dict, scenes: list[dict]) -> list[str]:
+    import re
+    queries: list[str] = []
+    for s in scenes:
+        q = s.get("youtube_query_ko", "")
+        if q and q not in queries:
+            queries.append(q)
+    headline_ko = topic.get("headline_ko", "")
+    words = re.sub(r'[!?,.\\[\]()「」『』【】…~·]', ' ', headline_ko).split()
+    if len(words) >= 3:
+        q = ' '.join(words[:3])
+        if q not in queries:
+            queries.append(q)
+    if len(words) >= 2:
+        q = ' '.join(words[:2])
+        if q not in queries:
+            queries.append(q)
+    for s in scenes:
+        q = s.get("youtube_query", "")
+        if q and q not in queries:
+            queries.append(q)
+    return queries
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 메인 실행
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 def run(output_dir: Path, assets_plan_path: Path) -> Path:
-    """에셋 수집 모듈 실행"""
-    console.print("\n[bold blue]━━ [3/6] 에셋 수집 시작 ━━[/bold blue]")
+    """에셋 수집 — 3층 필터 + 영상10/이미지10 분리 수집"""
+    console.print("\n[bold blue]━━ [3/6] 에셋 수집 (3층 필터 · 영상10 + 이미지10) ━━[/bold blue]")
 
     plan = json.loads(assets_plan_path.read_text(encoding="utf-8"))
     scenes = plan.get("scenes", [])
     assets_dir = output_dir / "assets"
     assets_dir.mkdir(exist_ok=True)
 
-    # 이전 실행에서 남은 mp4 정리 (jpg로 대체됐을 수 있으므로)
-    import shutil as _shutil
-    for mp4 in assets_dir.glob("scene_*.mp4"):
-        jpg = mp4.with_suffix(".jpg")
-        if jpg.exists():
-            mp4.unlink()
-            console.print(f"  [dim]이전 mp4 제거: {mp4.name} (jpg 있음)[/dim]")
+    # 토픽 로드
+    topics_path = output_dir / "trending_topics.json"
+    state_path = output_dir / "pipeline_state.json"
+    topic = {}
+    try:
+        if topics_path.exists():
+            topics = json.loads(topics_path.read_text(encoding="utf-8"))
+            if state_path.exists():
+                state = json.loads(state_path.read_text(encoding="utf-8"))
+                idx = state.get("results", {}).get("selected_topic_index", 0)
+                topic = topics[idx] if 0 <= idx < len(topics) else topics[0]
+            else:
+                topic = max(topics, key=lambda t: t.get("virality_score", 0))
+    except Exception:
+        pass
 
-    # 뉴스 기사 로드
-    news_articles_path = output_dir / "news_articles.json"
+    # 이전 풀 정리
+    for old in assets_dir.glob("pool_*"):
+        old.unlink(missing_ok=True)
+
+    queries = build_search_queries(topic, scenes)
+    console.print(f"  [dim]검색어: {queries[:6]}[/dim]")
+
+    import re as _re
+    headline_ko = topic.get("headline_ko", "")
+    words = _re.sub(r'[!?,.\[\]()「」『』【】…~·]', ' ', headline_ko).split()
+    image_queries = []
+    if len(words) >= 3:
+        image_queries.append(' '.join(words[:3]))
+    if len(words) >= 2:
+        q2 = ' '.join(words[:2])
+        if q2 not in image_queries:
+            image_queries.append(q2)
+
+    # ═══ STEP 1: YouTube 메타데이터 + 1층 키워드 필터 ═══
+    console.print("\n  [bold]📺 YouTube 검색 + 키워드 필터...[/bold]")
+    video_metas = search_youtube_metadata(queries, max_per_query=5)
+
+    # ═══ STEP 2: GPT 채널 분류 + 적합성 (2층 필터) ═══
+    if video_metas:
+        console.print("\n  [bold]🤖 GPT 채널 분류 + 적합성 판단...[/bold]")
+        video_metas = score_and_classify_videos(video_metas, topic, scenes)
+
+    # ═══ STEP 3: official/media만 다운로드 (최대 10개) ═══
+    video_pool = []
+    if video_metas:
+        console.print(f"\n  [bold]⬇️ 공식/미디어 영상 다운로드 (최대 {config.ASSET_VIDEO_TARGET}개)...[/bold]")
+        video_pool = download_official_videos(video_metas, assets_dir, min_score=5, max_count=config.ASSET_VIDEO_TARGET)
+
+    # ═══ STEP 4: 이미지 수집 (최대 10개) ═══
+    console.print(f"\n  [bold]📷 이미지 수집 (최대 {config.ASSET_IMAGE_TARGET}개)...[/bold]")
     news_articles = []
-    if news_articles_path.exists():
+    news_path = output_dir / "news_articles.json"
+    if news_path.exists():
         try:
-            news_articles = json.loads(news_articles_path.read_text(encoding="utf-8"))
+            news_articles = json.loads(news_path.read_text(encoding="utf-8"))
         except Exception:
             pass
+    image_pool = collect_all_images(news_articles, image_queries, assets_dir, max_count=config.ASSET_IMAGE_TARGET)
 
-    # ── STEP 1: 뉴스 기사 이미지 수집 ──
-    # 1-A: 기존 news_articles (최대 3개) + 1-B: 검색 결과 전체 기사 이미지
-    assigned: dict[int, Path] = {}
-    console.print("\n  [bold]📰 뉴스 기사 이미지 수집 중...[/bold]")
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        tmp_path = Path(tmp_dir)
+    # ═══ 이미지 크롭 ═══
+    for asset in image_pool:
+        crop_to_portrait(Path(asset["path"]))
 
-        # 1-A: 기존 news_articles 이미지
-        image_pool = collect_all_news_images(news_articles, tmp_path) if news_articles else []
+    # ═══ 전체 풀 합치기 ═══
+    asset_pool = video_pool + image_pool
 
-        # 1-B: 토픽 키워드로 네이버 추가 검색 → 더 많은 기사 이미지
-        try:
-            import re as _re
-            topics_path = output_dir / "trending_topics.json"
-            state_path = output_dir / "pipeline_state.json"
-            if topics_path.exists():
-                topics = json.loads(topics_path.read_text(encoding="utf-8"))
-                if state_path.exists():
-                    state = json.loads(state_path.read_text(encoding="utf-8"))
-                    idx = state.get("results", {}).get("selected_topic_index", 0)
-                    topic = topics[idx] if 0 <= idx < len(topics) else topics[0]
-                else:
-                    topic = max(topics, key=lambda t: t.get("virality_score", 0))
+    # ═══ AI 씬 자동 배치 ═══
+    console.print("\n  [bold]🎯 AI 씬 자동 배치...[/bold]")
+    assignments = ai_assign_pool_to_scenes(asset_pool, scenes)
 
-                headline_ko = topic.get("headline_ko", "")
-                summary_ko = topic.get("summary_ko", "")
-                words = _re.sub(r'[!?,.[\]()「」『』【】…~·]', ' ', headline_ko).split()
+    # ═══ 씬별 파일 복사 ═══
+    import shutil
+    for scene_id, pool_idx in assignments.items():
+        if 0 <= pool_idx < len(asset_pool):
+            src = Path(asset_pool[pool_idx]["path"])
+            dest = assets_dir / f"scene_{scene_id:02d}{src.suffix}"
+            if src.exists():
+                shutil.copy2(src, dest)
 
-                # 검색 쿼리 변형: 첫 3단어 / 첫 2단어 / summary_ko 첫 3단어
-                queries: list[str] = []
-                if len(words) >= 3:
-                    queries.append(' '.join(words[:3]))
-                if len(words) >= 2:
-                    q2 = ' '.join(words[:2])
-                    if q2 not in queries:
-                        queries.append(q2)
-                if summary_ko:
-                    sw = _re.sub(r'[!?,.[\]()「」『』【】…~·]', ' ', summary_ko).split()
-                    qs = ' '.join(sw[:3])
-                    if qs and qs not in queries:
-                        queries.append(qs)
+    # ═══ 결과 저장 ═══
+    pool_data = {
+        "pool": asset_pool,
+        "assignments": {str(k): v for k, v in assignments.items()},
+        "scenes": scenes,
+    }
+    pool_path = output_dir / "asset_pool.json"
+    pool_path.write_text(json.dumps(pool_data, indent=2, ensure_ascii=False), encoding="utf-8")
 
-                existing_urls = {a.get("url", "") for a in news_articles}
-                collected_img_urls: set[str] = {p["url"] for p in image_pool}
+    console.print(f"\n  [green]✓ 에셋 풀 총 {len(asset_pool)}개[/green]")
+    console.print(f"  [green]  🎬 영상: {len(video_pool)}개 (공식/미디어만)[/green]")
+    console.print(f"  [green]  📷 이미지: {len(image_pool)}개[/green]")
+    console.print(f"  [green]  🎯 AI 배치: {len(assignments)}/{len(scenes)}개 씬[/green]")
 
-                for q in queries:
-                    console.print(f"  [dim]검색 키워드: '{q}'[/dim]")
-                    extra_pool = collect_images_from_search(q, tmp_path, max_articles=30)
-                    for p in extra_pool:
-                        if p["article_title"] not in existing_urls and p["url"] not in collected_img_urls:
-                            image_pool.append(p)
-                            collected_img_urls.add(p["url"])
-        except Exception as e:
-            console.print(f"  [yellow]⚠ 추가 이미지 검색 실패: {e}[/yellow]")
-
-        console.print(f"  [cyan]최종 이미지 풀: {len(image_pool)}개[/cyan]")
-
-        if image_pool:
-            # ── STEP 2: AI 씬 배치 ──
-            console.print("\n  [bold]🤖 GPT-4o Vision 씬 배치 중...[/bold]")
-            assigned = ai_assign_images(image_pool, scenes)
-
-            # 배치된 이미지 → assets/ 로 복사 + 크롭
-            import shutil
-            for scene_id, src_path in assigned.items():
-                dest = assets_dir / f"scene_{scene_id:02d}.jpg"
-                shutil.copy2(src_path, dest)
-                crop_to_portrait(dest)
-
-
-    # ── STEP 3: 빈 씬만 yt-dlp 한국어 키워드 검색 ──
-    # 이미 파일이 있는 씬은 assigned에 추가 (이전 실행 결과 재사용)
-    for s in scenes:
-        sid = s["scene_id"]
-        if sid not in assigned:
-            for ext in ["jpg", "jpeg", "png", "mp4"]:
-                existing = assets_dir / f"scene_{sid:02d}.{ext}"
-                if existing.exists() and existing.stat().st_size > 10000:
-                    assigned[sid] = existing
-                    console.print(f"  [dim]씬 {sid}: 기존 파일 재사용 ({existing.name})[/dim]")
-                    break
-
-    missing_scenes = [s for s in scenes if s["scene_id"] not in assigned]
-    if missing_scenes:
-        console.print(f"\n  [bold]🎬 빈 씬 {len(missing_scenes)}개 — YouTube 검색 시도[/bold]")
-        topic_keywords = get_topic_keywords(output_dir)
-        console.print(f"  [dim]키워드: {topic_keywords}[/dim]")
-
-        used_keywords: set[str] = set()
-        kw_iter = iter(topic_keywords)
-
-        for scene in missing_scenes:
-            sid = scene["scene_id"]
-            video_path = assets_dir / f"scene_{sid:02d}.mp4"
-            found = False
-
-            # 씬별로 사용하지 않은 키워드 순서대로 시도
-            for kw in topic_keywords:
-                if kw in used_keywords:
-                    continue
-                if download_youtube_clip(kw, video_path):
-                    assigned[sid] = video_path
-                    used_keywords.add(kw)
-                    found = True
-                    break
-
-            if not found:
-                console.print(f"    [red]✗ 씬 {sid}: 에셋 없음 — 수동 추가 필요[/red]")
-
-    collected = len(assigned)
-    console.print(f"\n  [green]✓ {collected}/{len(scenes)}개 에셋 수집 완료 → {assets_dir}[/green]")
     return assets_dir
 
 

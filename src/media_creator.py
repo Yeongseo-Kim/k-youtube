@@ -98,7 +98,7 @@ I'm giving you a reference image. Use it as the background/base and create a stu
 Text style requirements:
 - Very large, bold font — must be readable at small sizes
 - High contrast color (white with black outline, or bright yellow/gold)
-- Place the text in the BOTTOM THIRD only (between 65%~85% from top) — never at the top
+- Place the text in the TOP SECTION only (between 15%~35% from top) — never at the very top (leave a 15% deadzone for UI elements)
 - Add subtle glow or shadow for legibility
 
 Overall thumbnail style:
@@ -120,7 +120,7 @@ Title: {title}
 
 Style requirements:
 - Bright, high-contrast colors (pink, purple, gold combinations)
-- Bold large text overlay placed in the BOTTOM THIRD (between 65%~85% from top) — never at the top
+- Bold large text overlay placed in the TOP SECTION (between 15%~35% from top) — leave a 15% deadzone at the very top for UI elements
 - K-pop/K-drama aesthetic (glossy, modern, energetic)
 - 9:16 portrait orientation, 1080x1920 resolution (vertical, for YouTube Shorts)
 - Eye-catching design that stops scrolling

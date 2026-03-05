@@ -137,9 +137,9 @@ def get_next_pending_step(output_dir: Path) -> int | None:
     state = load_state(output_dir)
     for step in range(1, 7):
         status = state["step_status"].get(str(step), "pending")
-        if status == "pending":
+        if status in ("pending", "failed"):
             return step
-        if status in ("running", "waiting_review", "failed"):
+        if status in ("running", "waiting_review"):
             return None  # 진행 중이거나 승인 대기 중
     return None  # 모두 완료
 

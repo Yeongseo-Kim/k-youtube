@@ -36,6 +36,54 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+# ── 로그인 게이트 ────────────────────────────────────────────
+def _check_login():
+    """비밀번호 로그인 게이트. 로그인 성공 전까지 앱 내용을 표시하지 않음."""
+    try:
+        import streamlit_authenticator as stauth
+    except ImportError:
+        # streamlit-authenticator 미설치 시 (로컬 빠른 실행) 건너뜀
+        return True
+
+    # Streamlit Secrets 또는 기본값에서 인증 정보 읽기
+    try:
+        username   = st.secrets.get("AUTH_USERNAME", "admin")
+        name       = st.secrets.get("AUTH_NAME", "Admin")
+        pw_hash    = st.secrets.get("AUTH_PASSWORD_HASH",
+                         "$2b$12$KL28nM/uZoBhjkgTjMq7uuvenTylq3yPf5SRBYwMsrvITJRxfrINi")  # 기본: admin123
+    except Exception:
+        username, name = "admin", "Admin"
+        pw_hash = "$2b$12$KL28nM/uZoBhjkgTjMq7uuvenTylq3yPf5SRBYwMsrvITJRxfrINi"
+
+    credentials = {
+        "usernames": {
+            username: {"name": name, "password": pw_hash}
+        }
+    }
+
+    authenticator = stauth.Authenticate(
+        credentials,
+        cookie_name="k_content_mc",
+        key="k_content_secret_key",
+        cookie_expiry_days=7,
+    )
+
+    name_out, auth_status, _ = authenticator.login("🔒 K-Content Mission Control 로그인", "main")
+
+    if auth_status is True:
+        authenticator.logout("로그아웃", "sidebar")
+        return True
+    elif auth_status is False:
+        st.error("❌ 아이디 또는 비밀번호가 틀렸습니다.")
+        st.stop()
+    else:
+        st.info("👋 로그인 후 이용할 수 있습니다.")
+        st.stop()
+
+if not _check_login():
+    st.stop()
+
+
 # ── CSS 커스텀 스타일 ─────────────────────────────────────────
 st.markdown("""
 <style>
@@ -77,11 +125,17 @@ def run_step_async(step: int, output_dir: Path):
     import io
     from rich.console import Console as RichConsole
 
+    # 이미 실행 중인 스레드가 있으면 중복 실행 방지
+    thread_name = f"step_{step}"
+    for t in threading.enumerate():
+        if t.name == thread_name and t.is_alive():
+            return  # 이미 실행 중
+
     log_path = get_log_path(output_dir)
 
     def _run():
         with open(log_path, "a", encoding="utf-8") as log_file:
-            log_file.write(f"\n{'='*50}\n[단계 {step}] 시작\n{'='*50}\n")
+            log_file.write(f"\n{'='*50}\n[단계 {step}] 시작 ({time.strftime('%H:%M:%S')})\n{'='*50}\n")
             log_file.flush()
 
             # rich 출력을 파일로 리디렉션
@@ -99,9 +153,11 @@ def run_step_async(step: int, output_dir: Path):
 
             try:
                 run_step(step, output_dir)
-                log_file.write(f"\n[단계 {step}] 완료\n")
+                log_file.write(f"\n[단계 {step}] ✅ 완료 ({time.strftime('%H:%M:%S')})\n")
             except Exception as e:
-                log_file.write(f"\n[단계 {step}] 오류: {e}\n")
+                log_file.write(f"\n[단계 {step}] ❌ 오류: {e}\n")
+                import traceback
+                log_file.write(traceback.format_exc())
                 # running 상태로 멈추지 않도록 failed로 강제 설정
                 from src.pipeline_controller import load_state, save_state
                 s = load_state(output_dir)
@@ -116,7 +172,7 @@ def run_step_async(step: int, output_dir: Path):
                         mod.console = mod._orig_console
                 log_file.flush()
 
-    t = threading.Thread(target=_run, daemon=True)
+    t = threading.Thread(target=_run, daemon=True, name=thread_name)
     t.start()
 
 
@@ -252,11 +308,26 @@ def render_dashboard(state: dict, output_dir: Path):
     col_run, col_reset = st.columns([3, 1])
     with col_run:
         if running:
-            st.info("⏳ 파이프라인 실행 중...")
+            # 실행 중인 단계 표시
+            running_step = next((s for s, v in statuses.items() if v == "running"), None)
+            running_name = STEP_NAMES.get(int(running_step), '') if running_step else ''
+            st.info(f"⏳ [{running_step}/6] {running_name} 실행 중...  (자동 새로고침 됨)")
         elif waiting:
             cp_step = next((s for s, v in statuses.items() if v == "waiting_review"), None)
             if cp_step:
                 st.warning(f"✋ {STEP_NAMES.get(int(cp_step), '')} — 검토 후 승인 필요")
+        elif failed_count > 0:
+            failed_step = next((s for s, v in statuses.items() if v == "failed"), None)
+            if failed_step:
+                error_msg = state.get('error', '')
+                st.error(f"❌ [{failed_step}/6] {STEP_NAMES.get(int(failed_step), '')} 실패{': ' + error_msg[:80] if error_msg else ''}")
+                if st.button(f"🔄 [{failed_step}/6] 재실행", type="primary", use_container_width=True):
+                    state_w = load_state(output_dir)
+                    state_w["step_status"][failed_step] = "pending"
+                    state_w["error"] = None
+                    save_state(output_dir, state_w)
+                    run_step_async(int(failed_step), output_dir)
+                    st.rerun()
         elif next_step:
             if st.button(f"▶ {STEP_NAMES[next_step]} 실행", type="primary", use_container_width=True):
                 run_step_async(next_step, output_dir)
@@ -266,6 +337,10 @@ def render_dashboard(state: dict, output_dir: Path):
     with col_reset:
         if st.button("🔄 전체 초기화", use_container_width=True):
             save_state(output_dir, _initial_state(output_dir))
+            # 모든 위젯 캐시 초기화
+            for k in list(st.session_state.keys()):
+                if k != "selected_date":
+                    del st.session_state[k]
             st.rerun()
 
     # 단계별 개별 실행/재실행 버튼
@@ -279,6 +354,7 @@ def render_dashboard(state: dict, output_dir: Path):
             if st.button(f"{icon} [{step_num}]\n{step_name[:5]}\n{label}", key=f"step_btn_{step_num}", use_container_width=True, disabled=running):
                 state_w = load_state(output_dir)
                 state_w["step_status"][str(step_num)] = "pending"
+                state_w["error"] = None
                 # 해당 단계 체크포인트 초기화
                 from src.pipeline_controller import CHECKPOINTS
                 for s, cp in CHECKPOINTS.items():
@@ -289,6 +365,13 @@ def render_dashboard(state: dict, output_dir: Path):
                     if state_w["step_status"].get(str(s)) == "pending":
                         state_w["step_status"][str(s)] = "done"
                 save_state(output_dir, state_w)
+                # 해당 단계 관련 세션 캐시 클리어
+                cache_keys = {
+                    2: ["script_editor", "script_ko_display", "_script_mtime", "_pending_script_en",
+                        "news_combined"] + [f"article_body_{j}" for j in range(10)],
+                }
+                for k in cache_keys.get(step_num, []):
+                    st.session_state.pop(k, None)
                 run_step_async(step_num, output_dir)
                 st.rerun()
 
@@ -477,6 +560,15 @@ def render_script_review(state: dict, output_dir: Path):
         st.warning("대본이 아직 생성되지 않았습니다. 파이프라인을 실행하세요.")
         return
 
+    # ── 파일 변경 감지: script.txt가 외부(재생성)에서 바뀌면 세션 캐시 무효화 ──
+    current_mtime = script_path.stat().st_mtime
+    prev_mtime = st.session_state.get("_script_mtime")
+    if prev_mtime is not None and current_mtime != prev_mtime:
+        # 파일이 변경됨 → 캐시된 위젯 값 제거
+        for k in ["script_editor", "script_ko_display", "_pending_script_en"]:
+            st.session_state.pop(k, None)
+    st.session_state["_script_mtime"] = current_mtime
+
     # 위젯 렌더 전에 pending 값 적용 (역적용 버튼용)
     if "_pending_script_en" in st.session_state:
         st.session_state["script_editor"] = st.session_state.pop("_pending_script_en")
@@ -626,6 +718,10 @@ def render_script_review(state: dict, output_dir: Path):
             save_state(output_dir, state_w)
             if script_ko_path.exists():
                 script_ko_path.unlink()
+            # 세션 캐시 무효화 → 재생성 후 새 내용 표시
+            for k in ["script_editor", "script_ko_display", "_script_mtime",
+                      "news_combined"] + [f"article_body_{i}" for i in range(10)]:
+                st.session_state.pop(k, None)
             run_step_async(2, output_dir)
             st.info("대본 재생성 중...")
             st.rerun()
@@ -763,13 +859,14 @@ def render_script_review(state: dict, output_dir: Path):
 # ── 탭 3: 에셋 확인 ──────────────────────────────────────────
 
 def render_asset_review(state: dict, output_dir: Path):
-    st.header("🎬 에셋 확인")
+    st.header("🎬 에셋 확인 및 배치")
 
     assets_dir = output_dir / "assets"
     assets_plan_path = output_dir / "assets_plan.json"
+    pool_json_path = output_dir / "asset_pool.json"
 
     if not assets_dir.exists():
-        st.warning("에셋이 아직 수집되지 않았습니다.")
+        st.warning("에셋이 아직 수집되지 않았습니다. 파이프라인을 실행하세요.")
         return
 
     # 에셋 플랜 로드
@@ -778,77 +875,183 @@ def render_asset_review(state: dict, output_dir: Path):
         plan = json.loads(assets_plan_path.read_text(encoding="utf-8"))
         plan_scenes = plan.get("scenes", [])
 
-    # 수집된 파일 목록
-    asset_files = sorted([
-        f for f in assets_dir.iterdir()
-        if f.suffix.lower() in [".mp4", ".mov", ".jpg", ".jpeg", ".png", ".webp"]
-    ])
+    # 에셋 풀 로드
+    pool_data = {}
+    asset_pool = []
+    assignments = {}
+    if pool_json_path.exists():
+        try:
+            pool_data = json.loads(pool_json_path.read_text(encoding="utf-8"))
+            asset_pool = pool_data.get("pool", [])
+            assignments = pool_data.get("assignments", {})
+        except Exception:
+            pass
 
-    st.markdown(f"**수집된 에셋:** {len(asset_files)} / 목표: {len(plan_scenes)} 씬")
+    # ═══ 섹션 1: 에셋 풀 — 영상/이미지 분리 표시 ═══
+    video_pool = [a for a in asset_pool if a.get("type") == "video"]
+    image_pool = [a for a in asset_pool if a.get("type") == "image"]
+    st.markdown(f"**에셋 풀:** 🎬 영상 {len(video_pool)}개 + 📷 이미지 {len(image_pool)}개 = **총 {len(asset_pool)}개**")
 
-    # 씬별 상태
-    for scene in plan_scenes:
-        sid = scene.get("scene_id", 0)
-        video_file = assets_dir / f"scene_{sid:02d}.mp4"
-        image_file = assets_dir / f"scene_{sid:02d}.jpg"
+    def _render_asset_grid(pool_subset, label):
+        if not pool_subset:
+            st.info(f"{label} 에셋이 없습니다.")
+            return
+        cols_per_row = 5
+        rows = [pool_subset[i:i+cols_per_row] for i in range(0, len(pool_subset), cols_per_row)]
+        for row in rows:
+            grid_cols = st.columns(cols_per_row)
+            for col, asset in zip(grid_cols, row):
+                with col:
+                    pool_idx = asset_pool.index(asset)
+                    is_video = asset.get("type") == "video"
+                    score = asset.get("score", 0)
+                    ch_type = asset.get("channel_type", "")
+                    type_icon = {"official": "🏢", "media": "📰", "fan": "👤"}.get(ch_type, "")
+                    score_color = "#22c55e" if score >= 7 else "#f59e0b" if score >= 4 else "#6b7280"
 
-        with st.expander(f"씬 {sid}: {scene.get('description', '')[:60]}"):
-            col_info, col_preview = st.columns([1, 1])
-            with col_info:
-                st.markdown(f"**YouTube 검색어:** `{scene.get('youtube_query', '')}`")
-                st.markdown(f"**이미지 검색어:** `{scene.get('image_query', '')}`")
-                st.markdown(f"**권장 길이:** {scene.get('duration_hint', '')}")
+                    asset_path = Path(asset.get("path", ""))
+                    if is_video and asset_path.exists():
+                        st.video(str(asset_path))
+                    elif asset_path.exists():
+                        st.image(str(asset_path), use_container_width=True)
+                    else:
+                        st.warning("파일 없음")
 
-            with col_preview:
-                if video_file.exists():
-                    st.video(str(video_file))
-                    st.success("✅ 영상 클립 수집됨")
-                elif image_file.exists():
-                    st.image(str(image_file))
-                    st.info("ℹ️ 이미지로 대체됨")
-                else:
-                    st.error("❌ 에셋 없음 — 수동 추가 필요")
+                    channel_display = asset.get("channel", "") or asset.get("reason", "")
                     st.markdown(
-                        f"파일명: `assets/scene_{sid:02d}.mp4` 또는 "
-                        f"`assets/scene_{sid:02d}.jpg`"
+                        f"<div style='font-size:0.72em;line-height:1.3;'>"
+                        f"<b>#{pool_idx+1}</b> {type_icon} "
+                        f"<span style='color:{score_color}'>[{score}/10]</span><br>"
+                        f"{asset.get('title','')[:30]}<br>"
+                        f"<span style='color:#888'>{channel_display[:25]}</span>"
+                        f"</div>",
+                        unsafe_allow_html=True
                     )
+
+    if asset_pool:
+        asset_tabs = st.tabs(["🎬 영상 에셋", "📷 이미지 에셋"])
+        with asset_tabs[0]:
+            _render_asset_grid(video_pool, "영상")
+        with asset_tabs[1]:
+            _render_asset_grid(image_pool, "이미지")
 
     st.divider()
 
-    # 모든 씬 교체 업로드 (채워진 씬 포함)
-    st.subheader("📁 에셋 교체 업로드")
-    all_scene_ids = [s.get("scene_id", 0) for s in plan_scenes]
-    target_scene = st.selectbox("교체할 씬 번호", all_scene_ids,
-                                format_func=lambda sid: f"씬 {sid}: {next((s.get('description','')[:40] for s in plan_scenes if s.get('scene_id')==sid), '')}")
-    uploaded = st.file_uploader(
-        f"씬 {target_scene} 파일 (mp4/jpg/png/avif)",
-        type=["mp4", "jpg", "jpeg", "png", "avif", "webp"]
-    )
-    if uploaded and st.button("업로드 / 교체", type="primary"):
-        suffix = Path(uploaded.name).suffix.lower()
-        # 기존 파일 제거 (jpg/mp4 둘 다)
-        for ext in [".jpg", ".jpeg", ".png", ".mp4", ".mov", ".avif", ".webp"]:
-            old = assets_dir / f"scene_{target_scene:02d}{ext}"
-            if old.exists():
-                old.unlink()
-        dest = assets_dir / f"scene_{target_scene:02d}{suffix}"
-        dest.write_bytes(uploaded.read())
-        # avif/webp → jpg 변환 (PIL 저장 호환성)
-        if suffix in [".avif", ".webp"]:
-            try:
-                from PIL import Image as _PIL
-                img = _PIL.open(dest).convert("RGB")
-                dest_jpg = dest.with_suffix(".jpg")
-                img.save(dest_jpg, "JPEG", quality=90)
-                dest.unlink()
-                dest = dest_jpg
-            except Exception as e:
-                st.warning(f"변환 실패, 원본 유지: {e}")
-        st.success(f"✅ {dest.name} 저장 완료!")
+    # ═══ 섹션 3: 씬별 배치 (드롭다운) ═══
+    st.subheader("🎯 씬별 에셋 배치")
+    st.caption("AI가 자동 배치한 결과입니다. 드롭다운으로 변경할 수 있습니다.")
+
+    pool_options = ["(없음)"] + [
+        f"#{i+1} {('🎬' if a.get('type')=='video' else '📷')} [{a.get('score',0)}/10] {a.get('title','')[:40]}"
+        for i, a in enumerate(asset_pool)
+    ]
+
+    new_assignments = {}
+    for scene in plan_scenes:
+        sid = scene.get("scene_id", 0)
+        current_idx = assignments.get(str(sid))
+
+        if current_idx is not None and 0 <= current_idx < len(asset_pool):
+            default_select = current_idx + 1
+        else:
+            default_select = 0
+
+        col_scene, col_select, col_preview = st.columns([2, 3, 2])
+        with col_scene:
+            st.markdown(f"**씬 {sid}**")
+            st.caption(scene.get("description", "")[:60])
+
+        with col_select:
+            selected = st.selectbox(
+                f"씬 {sid} 에셋",
+                range(len(pool_options)),
+                index=min(default_select, len(pool_options) - 1),
+                format_func=lambda x: pool_options[x],
+                key=f"scene_assign_{sid}",
+                label_visibility="collapsed",
+            )
+            if selected > 0:
+                new_assignments[str(sid)] = selected - 1
+
+        with col_preview:
+            if selected > 0 and (selected - 1) < len(asset_pool):
+                asset = asset_pool[selected - 1]
+                asset_path = Path(asset.get("path", ""))
+                if asset.get("type") == "video" and asset_path.exists():
+                    st.video(str(asset_path))
+                elif asset_path.exists():
+                    st.image(str(asset_path), use_container_width=True)
+            else:
+                for ext in [".mp4", ".jpg", ".jpeg", ".png"]:
+                    f = assets_dir / f"scene_{sid:02d}{ext}"
+                    if f.exists():
+                        if ext == ".mp4":
+                            st.video(str(f))
+                        else:
+                            st.image(str(f), use_container_width=True)
+                        break
+
+    # 배치 저장 버튼
+    if st.button("💾 배치 저장 및 적용", use_container_width=True, type="primary"):
+        pool_data["assignments"] = new_assignments
+        pool_json_path.write_text(json.dumps(pool_data, indent=2, ensure_ascii=False), encoding="utf-8")
+
+        import shutil
+        for sid_str, pool_idx in new_assignments.items():
+            if 0 <= pool_idx < len(asset_pool):
+                src = Path(asset_pool[pool_idx].get("path", ""))
+                ext = src.suffix
+                sid = int(sid_str)
+                for old_ext in [".mp4", ".jpg", ".jpeg", ".png"]:
+                    old = assets_dir / f"scene_{sid:02d}{old_ext}"
+                    if old.exists():
+                        old.unlink()
+                dest = assets_dir / f"scene_{sid:02d}{ext}"
+                if src.exists():
+                    shutil.copy2(src, dest)
+
+        st.success("✅ 배치 저장 완료!")
         st.rerun()
 
     st.divider()
 
+    # ═══ 섹션 4: 수동 파일 업로드 ═══
+    with st.expander("📁 수동 파일 업로드 (에셋 교체)", expanded=False):
+        all_scene_ids = [s.get("scene_id", 0) for s in plan_scenes]
+        if all_scene_ids:
+            target_scene = st.selectbox(
+                "교체할 씬 번호", all_scene_ids,
+                format_func=lambda sid: f"씬 {sid}: {next((s.get('description','')[:40] for s in plan_scenes if s.get('scene_id')==sid), '')}",
+                key="upload_target_scene",
+            )
+            uploaded = st.file_uploader(
+                f"씬 {target_scene} 파일",
+                type=["mp4", "jpg", "jpeg", "png", "avif", "webp"],
+                key="asset_uploader",
+            )
+            if uploaded and st.button("업로드 / 교체", type="primary", key="do_upload"):
+                suffix = Path(uploaded.name).suffix.lower()
+                for ext in [".jpg", ".jpeg", ".png", ".mp4", ".mov", ".avif", ".webp"]:
+                    old = assets_dir / f"scene_{target_scene:02d}{ext}"
+                    if old.exists():
+                        old.unlink()
+                dest = assets_dir / f"scene_{target_scene:02d}{suffix}"
+                dest.write_bytes(uploaded.read())
+                if suffix in [".avif", ".webp"]:
+                    try:
+                        from PIL import Image as _PIL
+                        img = _PIL.open(dest).convert("RGB")
+                        dest_jpg = dest.with_suffix(".jpg")
+                        img.save(dest_jpg, "JPEG", quality=90)
+                        dest.unlink()
+                    except Exception as e:
+                        st.warning(f"변환 실패, 원본 유지: {e}")
+                st.success(f"✅ 저장 완료!")
+                st.rerun()
+
+    st.divider()
+
+    # ═══ 섹션 5: 승인 ═══
     approved = is_approved(output_dir, "assets")
     if not approved:
         if st.button("✅ 에셋 확인 완료 — 승인", type="primary", use_container_width=True):
@@ -1323,9 +1526,22 @@ def main():
     with tabs[5]:
         render_upload(state, output_dir)
 
-    # 자동 새로고침 — 모든 탭 렌더 완료 후 실행
+    # 자동 새로고침 — running 상태일 때만, 스레드 생존 체크 포함
     statuses = state.get("step_status", {})
-    if any(v == "running" for v in statuses.values()):
+    running_steps = [s for s, v in statuses.items() if v == "running"]
+    if running_steps:
+        # 스레드가 실제로 살아있는지 체크
+        alive_threads = {t.name for t in threading.enumerate() if t.is_alive()}
+        for step_s in running_steps:
+            thread_name = f"step_{step_s}"
+            if thread_name not in alive_threads:
+                # 스레드가 죽었는데 running 상태 → failed로 변경
+                state_w = load_state(output_dir)
+                state_w["step_status"][step_s] = "failed"
+                state_w["error"] = state_w.get("error") or "스레드가 예기치 않게 종료됨 — 로그를 확인하세요"
+                save_state(output_dir, state_w)
+                st.rerun()
+                return
         time.sleep(2)
         st.rerun()
 

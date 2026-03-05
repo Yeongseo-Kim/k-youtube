@@ -37,10 +37,30 @@ TOKEN_PATH = Path("credentials/youtube_token.json")
 
 
 def get_authenticated_service():
-    """OAuth 2.0 인증 및 YouTube 서비스 객체 반환"""
+    """OAuth 2.0 인증 및 YouTube 서비스 객체 반환
+    
+    우선순위:
+    1. config.YOUTUBE_REFRESH_TOKEN (Streamlit Cloud Secrets) — 클라우드 배포 시
+    2. credentials/youtube_token.json — 로컬 개발 시
+    3. 브라우저 OAuth 플로우 — 초기 설정 시 (로컬만 가능)
+    """
     creds = None
 
-    # 저장된 토큰 로드
+    # ── 방법 1: Secrets에서 refresh token으로 인증 (클라우드 배포용) ──
+    if config.YOUTUBE_REFRESH_TOKEN and config.YOUTUBE_OAUTH_CLIENT_ID:
+        console.print("  [dim]YouTube Secrets refresh token으로 인증 중...[/dim]")
+        creds = Credentials(
+            token=None,
+            refresh_token=config.YOUTUBE_REFRESH_TOKEN,
+            token_uri="https://oauth2.googleapis.com/token",
+            client_id=config.YOUTUBE_OAUTH_CLIENT_ID,
+            client_secret=config.YOUTUBE_OAUTH_CLIENT_SECRET,
+            scopes=SCOPES,
+        )
+        creds.refresh(Request())
+        return build("youtube", "v3", credentials=creds)
+
+    # ── 방법 2: 로컬 토큰 파일 ──
     if TOKEN_PATH.exists():
         creds = Credentials.from_authorized_user_file(str(TOKEN_PATH), SCOPES)
 
@@ -62,6 +82,7 @@ def get_authenticated_service():
         console.print(f"  [green]✓ 토큰 저장 완료: {TOKEN_PATH}[/green]")
 
     return build("youtube", "v3", credentials=creds)
+
 
 
 def _trim_tags(tags_str: str, max_chars: int = 500) -> list[str]:
