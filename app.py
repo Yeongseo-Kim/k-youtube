@@ -37,48 +37,48 @@ st.set_page_config(
 )
 
 # ── 로그인 게이트 ────────────────────────────────────────────
-def _check_login():
-    """비밀번호 로그인 게이트. 로그인 성공 전까지 앱 내용을 표시하지 않음."""
-    try:
-        import streamlit_authenticator as stauth
-    except ImportError:
-        # streamlit-authenticator 미설치 시 (로컬 빠른 실행) 건너뜀
+def _check_login() -> bool:
+    """비밀번호 로그인 게이트. session_state + bcrypt 기반 커스텀 구현."""
+
+    # 이미 로그인된 경우
+    if st.session_state.get("authenticated"):
+        if st.sidebar.button("🚪 로그아웃"):
+            st.session_state["authenticated"] = False
+            st.rerun()
         return True
 
-    # Streamlit Secrets 또는 기본값에서 인증 정보 읽기
-    try:
-        username   = st.secrets.get("AUTH_USERNAME", "admin")
-        name       = st.secrets.get("AUTH_NAME", "Admin")
-        pw_hash    = st.secrets.get("AUTH_PASSWORD_HASH",
-                         "$2b$12$KL28nM/uZoBhjkgTjMq7uuvenTylq3yPf5SRBYwMsrvITJRxfrINi")  # 기본: admin123
-    except Exception:
-        username, name = "admin", "Admin"
-        pw_hash = "$2b$12$KL28nM/uZoBhjkgTjMq7uuvenTylq3yPf5SRBYwMsrvITJRxfrINi"
+    # 로그인 UI
+    st.markdown("## 🎬 K-Content Mission Control")
+    st.markdown("---")
+    col, _ = st.columns([1, 2])
+    with col:
+        st.markdown("### 🔒 로그인")
+        password = st.text_input("비밀번호", type="password", key="login_pw")
+        if st.button("로그인", type="primary", use_container_width=True):
+            # Secrets 또는 기본값에서 해시 읽기
+            try:
+                pw_hash = st.secrets.get(
+                    "AUTH_PASSWORD_HASH",
+                    "$2b$12$KL28nM/uZoBhjkgTjMq7uuvenTylq3yPf5SRBYwMsrvITJRxfrINi"
+                )
+            except Exception:
+                pw_hash = "$2b$12$KL28nM/uZoBhjkgTjMq7uuvenTylq3yPf5SRBYwMsrvITJRxfrINi"
 
-    credentials = {
-        "usernames": {
-            username: {"name": name, "password": pw_hash}
-        }
-    }
+            try:
+                import bcrypt
+                ok = bcrypt.checkpw(password.encode(), pw_hash.encode())
+            except Exception:
+                # bcrypt 없으면 평문 비교 (fallback)
+                ok = (password == st.secrets.get("AUTH_PASSWORD", "admin123"))
 
-    authenticator = stauth.Authenticate(
-        credentials,
-        cookie_name="k_content_mc",
-        key="k_content_secret_key",
-        cookie_expiry_days=7,
-    )
+            if ok:
+                st.session_state["authenticated"] = True
+                st.rerun()
+            else:
+                st.error("❌ 비밀번호가 틀렸습니다.")
 
-    name_out, auth_status, _ = authenticator.login("🔒 K-Content Mission Control 로그인", "main")
-
-    if auth_status is True:
-        authenticator.logout("로그아웃", "sidebar")
-        return True
-    elif auth_status is False:
-        st.error("❌ 아이디 또는 비밀번호가 틀렸습니다.")
-        st.stop()
-    else:
-        st.info("👋 로그인 후 이용할 수 있습니다.")
-        st.stop()
+    st.stop()
+    return False
 
 if not _check_login():
     st.stop()
