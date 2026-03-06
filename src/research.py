@@ -40,7 +40,9 @@ def fetch_reddit_trending(hours: int = 24, limit: int = 10) -> list[dict]:
     posts = []
     cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
 
-    headers = {"User-Agent": "k-content-bot/1.0"}
+    headers = {
+        "User-Agent": "python:k-content-shorts-bot:v1.0 (by /u/eldrac)"
+    }
 
     for sub in REDDIT_SUBREDDITS:
         try:

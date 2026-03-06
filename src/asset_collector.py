@@ -41,10 +41,19 @@ BLOCKED_TITLE_KEYWORDS = [
 ]
 
 
+import re
+
 def _is_blocked_by_keywords(title: str, description: str) -> bool:
     """1층 필터: 제목/설명에 차단 키워드가 있으면 True"""
     text = (title + " " + description).lower()
-    return any(kw in text for kw in BLOCKED_TITLE_KEYWORDS)
+    for kw in BLOCKED_TITLE_KEYWORDS:
+        if re.match(r"^[a-z\s]+$", kw):
+            if re.search(rf"\b{kw}\b", text):
+                return True
+        else:
+            if kw in text:
+                return True
+    return False
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -61,6 +70,7 @@ def search_youtube_metadata(queries: list[str], max_per_query: int = 5) -> list[
             cmd = [
                 "yt-dlp",
                 f"ytsearch{max_per_query}:{query}",
+                "--replace-in-metadata", "description", r"[\n\r]+", " ",
                 "--print", "%(title)s|||%(description).200s|||%(channel)s|||%(view_count)s|||%(duration)s|||%(webpage_url)s",
                 "--no-download",
                 "--quiet",
@@ -164,7 +174,7 @@ For each video, determine:
 2. score (1-10):
    - official channels: base 7-10
    - media channels: base 5-8
-   - fan channels: MAX 2 (we don't want fan content)
+   - fan channels: base 3-6 (We avoid reaction content, but curated info is okay)
    - Perfect topic match → higher score
    - Reaction/commentary → score 1
 3. best matching scene_id (int or null)
@@ -195,10 +205,10 @@ Return JSON: {{"scores": [{{"idx": 1, "channel_type": "official", "score": 9, "r
             v.setdefault("relevance_reason", "미분류")
             v.setdefault("recommended_scene", None)
 
-        # fan 채널은 강제 2점 이하
+        # fan 채널은 강제 4점 이하로 제한하지만 유용한 경우 4점까지는 허용
         for v in videos_meta:
-            if v["channel_type"] == "fan" and v["relevance_score"] > 2:
-                v["relevance_score"] = 2
+            if v["channel_type"] == "fan" and v["relevance_score"] > 4:
+                v["relevance_score"] = 4
                 v["relevance_reason"] += " (fan 채널 감점)"
 
         # 점수 내림차순 정렬
@@ -234,7 +244,7 @@ Return JSON: {{"scores": [{{"idx": 1, "channel_type": "official", "score": 9, "r
 def download_official_videos(
     scored_videos: list[dict],
     assets_dir: Path,
-    min_score: int = 5,
+    min_score: int = 4,
     max_count: int = 10,
 ) -> list[dict]:
     """official/media 채널 영상만 점수 순으로 다운로드."""
@@ -245,8 +255,10 @@ def download_official_videos(
         if len(downloaded) >= max_count:
             break
         if v.get("relevance_score", 0) < min_score:
+            console.print(f"  [dim]  ✗ 다운로드 제외 (점수 미달 {v.get('relevance_score', 0)}/10): {v['title'][:40]}[/dim]")
             continue
-        if v.get("channel_type") == "fan":
+        if v.get("channel_type") == "fan" and v.get("relevance_score", 0) < 4:
+            console.print(f"  [dim]  ✗ 다운로드 제외 (팬 채널 점수 미달): {v['title'][:40]}[/dim]")
             continue
 
         idx = len(downloaded) + 1
@@ -261,7 +273,7 @@ def download_official_videos(
                 "--output", str(output_path),
                 "--no-playlist", "--quiet", "--no-warnings",
             ]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=90)
             if result.returncode == 0 and output_path.exists() and output_path.stat().st_size > 10000:
                 downloaded.append({
                     "path": str(output_path),
@@ -278,10 +290,29 @@ def download_official_videos(
                 console.print(f"  [green]  ✓ {type_icon} [{v.get('relevance_score',0)}/10] {v['channel']}: {v['title'][:45]}[/green]")
             else:
                 output_path.unlink(missing_ok=True)
-        except (subprocess.TimeoutExpired, FileNotFoundError):
+                err_hint = (result.stderr or result.stdout or "")[:150].replace("\n", " ")
+                size_hint = ""
+                if output_path.exists():
+                    try:
+                        size_hint = f" (파일크기:{output_path.stat().st_size}B)"
+                    except OSError:
+                        pass
+                console.print(f"  [red]  ✗ 다운로드 실패: {v['title'][:35]} (코드:{result.returncode}{size_hint})[/red]")
+                if err_hint:
+                    console.print(f"  [dim]    → {err_hint}[/dim]")
+        except subprocess.TimeoutExpired:
             output_path.unlink(missing_ok=True)
+            console.print(f"  [red]  ✗ 다운로드 실패 (90초 시간초과): {v['title'][:40]}[/red]")
+        except FileNotFoundError:
+            output_path.unlink(missing_ok=True)
+            console.print(f"  [red]  ✗ yt-dlp 또는 ffmpeg 미설치 — pip install yt-dlp, 시스템에 ffmpeg 설치 필요[/red]")
+        except Exception as e:
+            output_path.unlink(missing_ok=True)
+            console.print(f"  [red]  ✗ 다운로드 실패: {v['title'][:40]} ({type(e).__name__}: {e})[/red]")
 
     console.print(f"  [cyan]영상 {len(downloaded)}개 다운로드 완료[/cyan]")
+    if len(downloaded) == 0 and len([v for v in scored_videos if v.get("channel_type") in ("official", "media") and v.get("relevance_score", 0) >= 4]) > 0:
+        console.print(f"  [yellow]  ⚠ 영상 0개: yt-dlp/ffmpeg 확인, Streamlit Cloud는 네트워크 제한 있을 수 있음[/yellow]")
     return downloaded
 
 
@@ -614,8 +645,10 @@ def run(output_dir: Path, assets_plan_path: Path) -> Path:
     # ═══ STEP 3: official/media만 다운로드 (최대 10개) ═══
     video_pool = []
     if video_metas:
+        candidates = [v for v in video_metas if v.get("channel_type") in ("official", "media") and v.get("relevance_score", 0) >= 4]
         console.print(f"\n  [bold]⬇️ 공식/미디어 영상 다운로드 (최대 {config.ASSET_VIDEO_TARGET}개)...[/bold]")
-        video_pool = download_official_videos(video_metas, assets_dir, min_score=5, max_count=config.ASSET_VIDEO_TARGET)
+        console.print(f"  [dim]  다운로드 대상: {len(candidates)}개 (official+media, 점수≥4)[/dim]")
+        video_pool = download_official_videos(video_metas, assets_dir, min_score=4, max_count=config.ASSET_VIDEO_TARGET)
 
     # ═══ STEP 4: 이미지 수집 (최대 10개) ═══
     console.print(f"\n  [bold]📷 이미지 수집 (최대 {config.ASSET_IMAGE_TARGET}개)...[/bold]")
