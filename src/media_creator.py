@@ -17,17 +17,19 @@ from src import reviewer
 console = Console()
 
 
-def generate_audio(script_text: str, output_path: Path) -> Path:
+def generate_audio(script_text: str, output_path: Path, speed: float = None) -> Path:
     """OpenAI TTS로 영어 내레이션 음성 생성"""
     console.print("  [dim]🎙 TTS 음성 생성 중...[/dim]")
     client = OpenAI(api_key=config.OPENAI_API_KEY)
+
+    tts_speed = speed if speed is not None else config.TTS_SPEED
 
     response = client.audio.speech.create(
         model=config.TTS_MODEL,
         voice=config.TTS_VOICE,
         input=script_text,
         response_format="mp3",
-        speed=config.TTS_SPEED,
+        speed=tts_speed,
     )
     response.stream_to_file(str(output_path))
 
@@ -154,7 +156,13 @@ Style requirements:
             "contents": [{"parts": parts}],
             "generationConfig": {
                 "responseModalities": ["IMAGE"]  # REST API에서는 IMAGE만 요청
-            }
+            },
+            "safetySettings": [
+                {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
+            ]
         }
 
         resp = requests.post(url, json=payload, timeout=60)
@@ -164,7 +172,15 @@ Style requirements:
         # 이미지 데이터 추출
         candidates = data.get("candidates", [])
         if not candidates:
-            raise ValueError(f"응답에 candidates 없음: {data}")
+            console.print(f"  [yellow]⚠ 이미지 생성 응답에 candidates 없음. 대체 썸네일 생성.[/yellow]")
+            _create_fallback_thumbnail(title, output_path)
+            return output_path
+
+        finish_reason = candidates[0].get("finishReason", "")
+        if finish_reason and finish_reason != "STOP":
+            console.print(f"  [yellow]⚠ 이미지 생성 차단 (사유: {finish_reason}). 대체 썸네일 생성.[/yellow]")
+            _create_fallback_thumbnail(title, output_path)
+            return output_path
 
         parts_out = candidates[0].get("content", {}).get("parts", [])
         image_saved = False
@@ -186,14 +202,16 @@ Style requirements:
                 break
         
         if not image_saved:
-            console.print(f"  [red]✗ 이미지 데이터 없음. 전체 응답: {data}[/red]")
-            raise ValueError(f"이미지 데이터 추출 실패. 응답: {data}")
+            console.print(f"  [yellow]⚠ 모델 응답에 이미지 데이터 없음. 대체 썸네일 생성.[/yellow]")
+            _create_fallback_thumbnail(title, output_path)
+            return output_path
 
         console.print(f"  [green]✓ 썸네일 생성 완료: {output_path}[/green]")
 
     except Exception as e:
-        console.print(f"  [red]✗ Gemini 썸네일 오류: {e}[/red]")
-        raise
+        console.print(f"  [yellow]⚠ Gemini 썸네일 오류 발생: {e}[/yellow]")
+        console.print("  [dim]대체 썸네일을 생성합니다...[/dim]")
+        _create_fallback_thumbnail(title, output_path)
 
     return output_path
 
@@ -229,25 +247,13 @@ def run(output_dir: Path, script_path: Path, metadata_path: Path) -> tuple[Path,
     thumbnail_path = output_dir / "thumbnail.png"
 
     # 1. TTS 음성 생성
-    generate_audio(script_text, audio_path)
+    tts_speed = metadata.get("tts_speed", config.TTS_SPEED)
+    generate_audio(script_text, audio_path, speed=tts_speed)
 
     # 2. Whisper 자막 생성
     generate_subtitles(audio_path, subtitle_path)
 
-    # 3. Gemini 썸네일 생성
-    generate_thumbnail(metadata, thumbnail_path)
-
-    # 4. SEO 리뷰 (메타데이터 품질 검사)
-    console.print("  [dim]🤖 SEO 리뷰어 검토 중...[/dim]")
-    metadata_str = json.dumps(metadata, indent=2)
-    seo_review = reviewer.evaluate("seo_optimizer", metadata_str)
-
-    if not seo_review.get("passed") and seo_review.get("improved_title"):
-        console.print("  [cyan]SEO 개선사항 적용 중...[/cyan]")
-        metadata["title"] = seo_review.get("improved_title", metadata["title"])
-        if seo_review.get("improved_tags"):
-            metadata["tags"] = seo_review.get("improved_tags", metadata["tags"])
-        metadata_path.write_text(json.dumps(metadata, indent=2, ensure_ascii=False), encoding="utf-8")
+    # 3 & 4: 썸네일 생성 및 SEO 리뷰 로직 제거 (Step 4로 분리됨)  
 
     return audio_path, subtitle_path, thumbnail_path
 

@@ -135,13 +135,21 @@ def is_approved(output_dir: Path, checkpoint: str) -> bool:
 def get_next_pending_step(output_dir: Path) -> int | None:
     """다음 실행 가능한 단계 번호 반환. 없으면 None."""
     state = load_state(output_dir)
-    for step in range(1, 7):
-        status = state["step_status"].get(str(step), "pending")
-        if status in ("pending", "failed"):
-            return step
-        if status in ("running", "waiting_review"):
-            return None  # 진행 중이거나 승인 대기 중
-    return None  # 모두 완료
+    status = state["step_status"]
+    cp = state["checkpoints"]
+
+    if status.get("1", "pending") in ("pending", "failed"): return 1
+    if status.get("2", "pending") in ("pending", "failed"): return 2
+    if not cp.get("script", False): return None # 승인 대기
+    if status.get("3", "pending") in ("pending", "failed"): return 3
+    if not cp.get("assets", False): return None # 승인 대기
+    if status.get("4", "pending") in ("pending", "failed"): return 4
+    if not cp.get("thumbnail", False): return None # 승인 대기
+    if status.get("5", "pending") in ("pending", "failed"): return 5
+    if not cp.get("video", False): return None # 승인 대기
+    if status.get("6", "pending") in ("pending", "failed"): return 6
+
+    return None
 
 
 # ── 단계별 실행 함수 ──────────────────────────────────────────
@@ -246,40 +254,76 @@ def _run_step2(output_dir: Path) -> None:
 
 
 def _run_step3(output_dir: Path) -> None:
-    import concurrent.futures
     from src.asset_collector import run as collect_assets
-    from src.media_creator import run as create_media
+    from src.media_creator import generate_audio, generate_subtitles, run as create_media 
+    import json
 
     state = load_state(output_dir)
     script_path = Path(state["results"].get("script_path", output_dir / "script.txt"))
     assets_plan_path = Path(state["results"].get("assets_plan_path", output_dir / "assets_plan.json"))
-    metadata_path = Path(state["results"].get("metadata_path", output_dir / "metadata.json"))
 
-    console.print("[bold magenta]━━ 에셋 수집 & 미디어 생성 병렬 실행 ━━[/bold magenta]")
-    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-        future_assets = executor.submit(collect_assets, output_dir, assets_plan_path)
-        future_media = executor.submit(create_media, output_dir, script_path, metadata_path)
-        assets_dir = future_assets.result()
-        audio_path, subtitle_path, thumbnail_path = future_media.result()
+    console.print("[bold magenta]━━ 에셋 수집 & 오디오/자막 생성 시작 ━━[/bold magenta]")
+    
+    # 1. 에셋 수집 (순차)
+    assets_dir = collect_assets(output_dir, assets_plan_path)
+
+    # 2. 오디오 & 자막 생성 (썸네일 미포함)
+    script_text = script_path.read_text(encoding="utf-8")
+    audio_path = output_dir / "audio.mp3"
+    subtitle_path = output_dir / "subtitle.srt"
+    
+    import config
+    metadata_path = Path(state["results"].get("metadata_path", output_dir / "metadata.json"))
+    tts_speed = config.TTS_SPEED
+    if metadata_path.exists():
+        try:
+            meta = json.loads(metadata_path.read_text(encoding="utf-8"))
+            tts_speed = meta.get("tts_speed", config.TTS_SPEED)
+        except Exception:
+            pass
+            
+    generate_audio(script_text, audio_path, speed=tts_speed)
+    generate_subtitles(audio_path, subtitle_path)
 
     update_step(
         output_dir, 3, "running",
         assets_dir=str(assets_dir),
         audio_path=str(audio_path),
         subtitle_path=str(subtitle_path),
-        thumbnail_path=str(thumbnail_path),
     )
 
 
 def _run_step4(output_dir: Path) -> None:
-    """Step 4는 Step 3와 병렬로 이미 처리됨 — 썸네일 승인 체크포인트 단계."""
-    # 실제 미디어 생성은 _run_step3에서 병렬로 완료됨
-    # step4는 체크포인트(thumbnail 승인)를 위한 별도 단계로만 사용
+    """Step 4 썸네일 생성 및 메타데이터 리뷰 (수동 실행됨)."""
+    from src.media_creator import generate_thumbnail
+    from src import reviewer
+    import json
+    
     state = load_state(output_dir)
-    thumbnail_path = state["results"].get("thumbnail_path", str(output_dir / "thumbnail.png"))
-    if not Path(thumbnail_path).exists():
-        raise FileNotFoundError(f"썸네일 파일 없음: {thumbnail_path}")
-    update_step(output_dir, 4, "running", thumbnail_path=thumbnail_path)
+    metadata_path = Path(state["results"].get("metadata_path", output_dir / "metadata.json"))
+    thumbnail_path = output_dir / "thumbnail.png"
+    
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    
+    # 썸네일 단독 생성
+    generate_thumbnail(metadata, thumbnail_path)
+    
+    # SEO 리뷰
+    console.print("  [dim]🤖 SEO 리뷰어 검토 중...[/dim]")
+    metadata_str = json.dumps(metadata, indent=2)
+    seo_review = reviewer.evaluate("seo_optimizer", metadata_str)
+
+    if not seo_review.get("passed") and seo_review.get("improved_title"):
+        console.print("  [cyan]SEO 개선사항 적용 중...[/cyan]")
+        metadata["title"] = seo_review.get("improved_title", metadata["title"])
+        if seo_review.get("improved_tags"):
+            metadata["tags"] = seo_review.get("improved_tags", metadata["tags"])
+        metadata_path.write_text(json.dumps(metadata, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    if not thumbnail_path.exists():
+        raise FileNotFoundError(f"썸네일 파일 생성 실패: {thumbnail_path}")
+        
+    update_step(output_dir, 4, "running", thumbnail_path=str(thumbnail_path))
 
 
 def _run_step5(output_dir: Path) -> None:

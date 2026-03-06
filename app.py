@@ -225,7 +225,7 @@ def render_sidebar(state: dict, output_dir: Path):
         st.markdown("### 진행 상황")
         statuses = state.get("step_status", {})
 
-        step_display = [1, 2, "cp_script", 3, "cp_assets", "cp_thumbnail", 5, "cp_video", 6]
+        step_display = [1, 2, "cp_script", 3, "cp_assets", 4, "cp_thumbnail", 5, "cp_video", 6]
         for item in step_display:
             if isinstance(item, str) and item.startswith("cp_"):
                 cp = item[3:]
@@ -701,10 +701,39 @@ def render_script_review(state: dict, output_dir: Path):
         approved = is_approved(output_dir, "script")
         if not approved:
             if st.button("✅ 승인하고 다음 단계로", type="primary", use_container_width=True):
+                # 1. 파일 저장
                 script_path.write_text(edited_script, encoding="utf-8")
+                
+                # 2. 대본이 변경되었을 수 있으므로 유튜브 검색어(assets_plan.json)를 새 대본에 맞게 다시 추출 (토픽 불일치 방지)
+                with st.spinner("새 대본에 맞춰 검색 키워드를 다시 추출 중입니다..."):
+                    try:
+                        from openai import OpenAI
+                        client = OpenAI(api_key=config.OPENAI_API_KEY)
+                        prompt = f"""Based on the following YouTube Shorts script, generate a JSON plan for visual media assets (images/videos) to display.
+The script is about K-pop or K-content.
+Return exactly 5-7 scenes.
+
+Script:
+{edited_script}
+
+Format requirements:
+Return JSON: {{"scenes": [{{"scene_id": 1, "description": "...", "youtube_query": "specific english search term", "youtube_query_ko": "한국어 검색어", "image_query": "fallback image term", "duration_hint": "3-5 seconds"}}, ...]}}
+"""
+                        resp = client.chat.completions.create(
+                            model="gpt-4o-mini",
+                            messages=[{"role": "user", "content": prompt}],
+                            response_format={"type": "json_object"},
+                            temperature=0.7,
+                        )
+                        new_plan = resp.choices[0].message.content
+                        assets_plan_path = output_dir / "assets_plan.json"
+                        assets_plan_path.write_text(new_plan, encoding="utf-8")
+                    except Exception as e:
+                        st.error(f"검색어 재생성 실패 (기존 플랜 사용): {e}")
+
+                # 3. 승인 처리 (다음 단계 자동 실행 방지, 수동 실행 유도)
                 approve_checkpoint(output_dir, "script")
-                run_step_async(3, output_dir)
-                st.success("✅ 대본 승인 완료! 에셋 수집 & 미디어 생성 시작...")
+                st.success("✅ 대본 승인 완료! [파이프라인 대시보드]로 돌아가서 [3/6 에셋 수집]을 실행하세요.")
                 time.sleep(1)
                 st.rerun()
         else:
@@ -732,6 +761,20 @@ def render_script_review(state: dict, output_dir: Path):
     metadata_path = output_dir / "metadata.json"
     if metadata_path.exists():
         meta = json.loads(metadata_path.read_text(encoding="utf-8"))
+
+        st.divider()
+        st.subheader("🔊 음성(TTS) 설정")
+        import config
+        current_speed = meta.get("tts_speed", config.TTS_SPEED)
+        new_speed = st.slider(
+            "영어 내레이션 속도", 
+            min_value=0.5, max_value=2.0, value=float(current_speed), step=0.05,
+            help="기본값은 .env의 TTS_SPEED입니다. 저장 후 [4/6 미디어 생성] 시 반영됩니다."
+        )
+        if new_speed != current_speed:
+            meta["tts_speed"] = new_speed
+            metadata_path.write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
+            
         title_options = meta.get("title_options", [])
 
         if title_options:
