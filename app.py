@@ -23,7 +23,7 @@ import streamlit as st
 
 import config
 from src.pipeline_controller import (
-    load_state, save_state, update_step, approve_checkpoint, is_approved,
+    load_state, save_state, approve_checkpoint, is_approved,
     run_step, STEP_NAMES, CHECKPOINTS, get_next_pending_step, _initial_state
 )
 from src.seo_optimizer import score_metadata, optimize_metadata, get_score_badge
@@ -102,6 +102,17 @@ st.markdown("""
         background: #1e1e2e; border-radius: 12px;
         padding: 16px; text-align: center;
     }
+    .step-card-done { border: 2px solid #22c55e; background: #22c55e18; border-radius: 10px; padding: 10px; margin: 4px 0; }
+    .step-card-running { border: 2px solid #3b82f6; background: #3b82f618; border-radius: 10px; padding: 10px; margin: 4px 0; animation: pulse 1.5s infinite; }
+    .step-card-waiting_review { border: 2px solid #f59e0b; background: #f59e0b18; border-radius: 10px; padding: 10px; margin: 4px 0; }
+    .step-card-failed { border: 2px solid #ef4444; background: #ef444418; border-radius: 10px; padding: 10px; margin: 4px 0; }
+    .step-card-pending { border: 2px solid #4b5563; background: #1f293722; border-radius: 10px; padding: 10px; margin: 4px 0; }
+    .step-status-badge { font-size: 0.7em; font-weight: bold; padding: 2px 6px; border-radius: 4px; }
+    .step-status-done { color: #22c55e; }
+    .step-status-running { color: #3b82f6; }
+    .step-status-waiting_review { color: #f59e0b; }
+    .step-status-failed { color: #ef4444; }
+    .step-status-pending { color: #9ca3af; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -118,6 +129,45 @@ def get_output_dir() -> Path:
 
 def get_log_path(output_dir: Path) -> Path:
     return output_dir / "pipeline_log.txt"
+
+
+def _render_next_step_button(output_dir: Path, key: str) -> None:
+    """실제 다음 단계가 있을 때만 실행 버튼 표시. 승인 대기 시 비활성화."""
+    state = load_state(output_dir)
+    statuses = state.get("step_status", {})
+    running = any(v == "running" for v in statuses.values())
+    next_step = get_next_pending_step(output_dir)
+    if next_step is not None:
+        if st.button(f"▶ [{next_step}/6] {STEP_NAMES[next_step]} 실행", type="primary", use_container_width=True, disabled=running, key=key):
+            _trigger_step_run(next_step, output_dir)
+            st.rerun()
+    else:
+        if running:
+            st.caption("⏳ 다른 단계 실행 중...")
+        else:
+            st.info("✋ 승인 후 진행 — 위 탭에서 검토 후 승인해주세요.")
+
+
+def _trigger_step_run(step_num: int, output_dir: Path) -> None:
+    """단계 실행 트리거: 상태 저장 후 run_step_async 호출."""
+    state_w = load_state(output_dir)
+    state_w["step_status"][str(step_num)] = "running"
+    state_w["error"] = None
+    from src.pipeline_controller import CHECKPOINTS
+    for s, cp in CHECKPOINTS.items():
+        if s == step_num:
+            state_w["checkpoints"][cp] = False
+    for s in range(1, step_num):
+        if state_w["step_status"].get(str(s)) == "pending":
+            state_w["step_status"][str(s)] = "done"
+    save_state(output_dir, state_w)
+    cache_keys = {
+        2: ["script_editor", "script_ko_display", "_script_mtime", "_pending_script_en",
+            "news_combined"] + [f"article_body_{j}" for j in range(10)],
+    }
+    for k in cache_keys.get(step_num, []):
+        st.session_state.pop(k, None)
+    run_step_async(step_num, output_dir)
 
 
 def run_step_async(step: int, output_dir: Path):
@@ -300,40 +350,9 @@ def render_dashboard(state: dict, output_dir: Path):
 
     st.divider()
 
-    # 실행 컨트롤
-    next_step = get_next_pending_step(output_dir)
+    # 실행 컨트롤 — 단계별 실행만 (상단 배너에서 전체 상태 확인)
     running = any(v == "running" for v in statuses.values())
-    waiting = any(v == "waiting_review" for v in statuses.values())
-
-    col_run, col_reset = st.columns([3, 1])
-    with col_run:
-        if running:
-            # 실행 중인 단계 표시
-            running_step = next((s for s, v in statuses.items() if v == "running"), None)
-            running_name = STEP_NAMES.get(int(running_step), '') if running_step else ''
-            st.info(f"⏳ [{running_step}/6] {running_name} 실행 중...  (자동 새로고침 됨)")
-        elif waiting:
-            cp_step = next((s for s, v in statuses.items() if v == "waiting_review"), None)
-            if cp_step:
-                st.warning(f"✋ {STEP_NAMES.get(int(cp_step), '')} — 검토 후 승인 필요")
-        elif failed_count > 0:
-            failed_step = next((s for s, v in statuses.items() if v == "failed"), None)
-            if failed_step:
-                error_msg = state.get('error', '')
-                st.error(f"❌ [{failed_step}/6] {STEP_NAMES.get(int(failed_step), '')} 실패{': ' + error_msg[:80] if error_msg else ''}")
-                if st.button(f"🔄 [{failed_step}/6] 재실행", type="primary", use_container_width=True):
-                    state_w = load_state(output_dir)
-                    state_w["step_status"][failed_step] = "pending"
-                    state_w["error"] = None
-                    save_state(output_dir, state_w)
-                    run_step_async(int(failed_step), output_dir)
-                    st.rerun()
-        elif next_step:
-            if st.button(f"▶ {STEP_NAMES[next_step]} 실행", type="primary", use_container_width=True):
-                run_step_async(next_step, output_dir)
-                st.rerun()
-        else:
-            st.success("✅ 모든 단계 완료!")
+    col_reset, _ = st.columns([1, 3])
     with col_reset:
         if st.button("🔄 전체 초기화", use_container_width=True):
             save_state(output_dir, _initial_state(output_dir))
@@ -343,36 +362,27 @@ def render_dashboard(state: dict, output_dir: Path):
                     del st.session_state[k]
             st.rerun()
 
-    # 단계별 개별 실행/재실행 버튼
-    st.markdown("##### 단계별 개별 실행")
+    # 단계별 개별 실행
+    st.subheader("▶ 단계별 실행")
+    st.caption("클릭 시 해당 단계 실행/재실행 | ✅완료 ⏳실행중 ✋승인대기 ❌실패 ⬜대기")
     step_cols = st.columns(6)
+    STATUS_LABELS = {"done": "완료", "running": "실행중", "waiting_review": "승인대기", "failed": "실패", "pending": "대기"}
     for i, (col, (step_num, step_name)) in enumerate(zip(step_cols, STEP_NAMES.items())):
         with col:
             status = statuses.get(str(step_num), "pending")
             icon = {"done": "✅", "running": "⏳", "waiting_review": "✋", "failed": "❌", "pending": "⬜"}.get(status, "⬜")
+            status_text = STATUS_LABELS.get(status, "대기")
+            card_class = f"step-card-{status}"
+            st.markdown(
+                f'<div class="{card_class}" style="text-align:center;">'
+                f'<div class="step-status-{status}" style="font-size:0.75em;margin-bottom:4px;">{icon} {status_text}</div>'
+                f'<div style="font-weight:bold;font-size:0.9em;">[{step_num}/6] {step_name[:14]}{"…" if len(step_name)>14 else ""}</div>'
+                f'</div>',
+                unsafe_allow_html=True
+            )
             label = "재실행" if status in ("done", "waiting_review", "failed") else "실행"
-            if st.button(f"{icon} [{step_num}]\n{step_name[:5]}\n{label}", key=f"step_btn_{step_num}", use_container_width=True, disabled=running):
-                state_w = load_state(output_dir)
-                state_w["step_status"][str(step_num)] = "pending"
-                state_w["error"] = None
-                # 해당 단계 체크포인트 초기화
-                from src.pipeline_controller import CHECKPOINTS
-                for s, cp in CHECKPOINTS.items():
-                    if s == step_num:
-                        state_w["checkpoints"][cp] = False
-                # 이전 단계는 done으로 마킹
-                for s in range(1, step_num):
-                    if state_w["step_status"].get(str(s)) == "pending":
-                        state_w["step_status"][str(s)] = "done"
-                save_state(output_dir, state_w)
-                # 해당 단계 관련 세션 캐시 클리어
-                cache_keys = {
-                    2: ["script_editor", "script_ko_display", "_script_mtime", "_pending_script_en",
-                        "news_combined"] + [f"article_body_{j}" for j in range(10)],
-                }
-                for k in cache_keys.get(step_num, []):
-                    st.session_state.pop(k, None)
-                run_step_async(step_num, output_dir)
+            if st.button(f"{label}", key=f"step_btn_{step_num}", use_container_width=True, disabled=running, type="secondary"):
+                _trigger_step_run(step_num, output_dir)
                 st.rerun()
 
     st.divider()
@@ -551,6 +561,8 @@ def translate_to_english(text: str) -> str:
 
 def render_script_review(state: dict, output_dir: Path):
     st.header("📝 대본 검토")
+    _render_next_step_button(output_dir, "next_step_script")
+    st.divider()
 
     script_path = output_dir / "script.txt"
     script_ko_path = output_dir / "script_ko.txt"
@@ -742,7 +754,7 @@ Return JSON: {{"scenes": [{{"scene_id": 1, "description": "...", "youtube_query"
     with col3:
         if st.button("🔄 대본 재생성", use_container_width=True):
             state_w = load_state(output_dir)
-            state_w["step_status"]["2"] = "pending"
+            state_w["step_status"]["2"] = "running"
             state_w["checkpoints"]["script"] = False
             save_state(output_dir, state_w)
             if script_ko_path.exists():
@@ -903,6 +915,8 @@ Return JSON: {{"scenes": [{{"scene_id": 1, "description": "...", "youtube_query"
 
 def render_asset_review(state: dict, output_dir: Path):
     st.header("🎬 에셋 확인 및 배치")
+    _render_next_step_button(output_dir, "next_step_asset")
+    st.divider()
 
     assets_dir = output_dir / "assets"
     assets_plan_path = output_dir / "assets_plan.json"
@@ -1135,6 +1149,8 @@ def _gpt_generate_thumb_texts(metadata: dict, script_text: str) -> list[str]:
 
 def render_thumbnail_review(state: dict, output_dir: Path):
     st.header("🖼 썸네일 검토")
+    _render_next_step_button(output_dir, "next_step_thumb")
+    st.divider()
 
     thumbnail_path = output_dir / "thumbnail.png"
     assets_dir = output_dir / "assets"
@@ -1341,6 +1357,8 @@ def render_thumbnail_review(state: dict, output_dir: Path):
 
 def render_video_review(state: dict, output_dir: Path):
     st.header("🎥 영상 검토")
+    _render_next_step_button(output_dir, "next_step_video")
+    st.divider()
 
     assets_approved = is_approved(output_dir, "assets")
     thumbnail_approved = is_approved(output_dir, "thumbnail")
@@ -1360,8 +1378,10 @@ def render_video_review(state: dict, output_dir: Path):
         if step5_status == "failed":
             st.error("❌ 이전 영상 편집 실패. 로그를 확인하고 재시도하세요.")
         if st.button("▶ 영상 편집 시작" if step5_status != "failed" else "🔄 영상 편집 재시도", type="primary"):
+            state_w = load_state(output_dir)
+            state_w["step_status"]["5"] = "running"
+            save_state(output_dir, state_w)
             run_step_async(5, output_dir)
-            st.info("영상 편집 중... (수 분 소요)")
             st.rerun()
         return
     elif step5_status == "running":
@@ -1394,7 +1414,7 @@ def render_video_review(state: dict, output_dir: Path):
     with col2:
         if st.button("🔄 영상 재렌더링", use_container_width=True):
             state_w = load_state(output_dir)
-            state_w["step_status"]["5"] = "pending"
+            state_w["step_status"]["5"] = "running"
             state_w["checkpoints"]["video"] = False
             save_state(output_dir, state_w)
             run_step_async(5, output_dir)
@@ -1406,6 +1426,8 @@ def render_video_review(state: dict, output_dir: Path):
 
 def render_upload(state: dict, output_dir: Path):
     st.header("📤 YouTube 업로드")
+    _render_next_step_button(output_dir, "next_step_upload")
+    st.divider()
 
     video_approved = is_approved(output_dir, "video")
     if not video_approved:
@@ -1527,10 +1549,10 @@ def render_upload(state: dict, output_dir: Path):
             updated_tags = st.session_state.tags
             meta.update({"title": title, "description": description, "tags": updated_tags})
             metadata_path.write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
-            with st.spinner("업로드 중... (수 분 소요)"):
-                run_step_async(6, output_dir)
-            st.info("업로드 시작! 잠시 후 결과를 확인하세요.")
-            time.sleep(3)
+            state_w = load_state(output_dir)
+            state_w["step_status"]["6"] = "running"
+            save_state(output_dir, state_w)
+            run_step_async(6, output_dir)
             st.rerun()
 
     with col2:
@@ -1546,12 +1568,47 @@ def render_upload(state: dict, output_dir: Path):
 
 # ── 메인 앱 ──────────────────────────────────────────────────
 
+def _render_global_status_banner(state: dict, output_dir: Path) -> None:
+    """상단 전역 상태 배너 — 실행중/승인대기/실패/완료 한눈에 표시."""
+    statuses = state.get("step_status", {})
+    running = any(v == "running" for v in statuses.values())
+    waiting = any(v == "waiting_review" for v in statuses.values())
+    failed = any(v == "failed" for v in statuses.values())
+    all_done = all(v in ("done", "waiting_review") for v in statuses.values())
+
+    if running:
+        step = next((s for s, v in statuses.items() if v == "running"), None)
+        name = STEP_NAMES.get(int(step), "") if step else ""
+        st.info(f"⏳ **실행 중** — [{step}/6] {name} (자동 새로고침)")
+    elif waiting:
+        step = next((s for s, v in statuses.items() if v == "waiting_review"), None)
+        name = STEP_NAMES.get(int(step), "") if step else ""
+        st.warning(f"✋ **승인 대기** — [{step}/6] {name} 검토 후 승인 필요")
+    elif failed:
+        step = next((s for s, v in statuses.items() if v == "failed"), None)
+        name = STEP_NAMES.get(int(step), "") if step else ""
+        err = (state.get("error") or "")[:60]
+        st.error(f"❌ **실패** — [{step}/6] {name} {err}")
+    elif all_done:
+        st.success("✅ **모든 단계 완료**")
+    else:
+        next_step = get_next_pending_step(output_dir)
+        if next_step:
+            st.caption(f"⬜ 대기 중 — 다음: [{next_step}/6] {STEP_NAMES[next_step]} 실행 가능")
+        else:
+            st.caption("⬜ 승인 후 진행 가능")
+
+
 def main():
     output_dir = get_output_dir()
     state = load_state(output_dir)
 
     # 사이드바
     render_sidebar(state, output_dir)
+
+    # 전역 상태 배너 (탭 위에 항상 표시)
+    _render_global_status_banner(state, output_dir)
+    st.divider()
 
     # 탭
     tabs = st.tabs(["📋 대시보드", "📝 대본", "🎬 에셋", "🖼 썸네일", "🎥 영상", "📤 업로드"])
@@ -1578,11 +1635,15 @@ def main():
         for step_s in running_steps:
             thread_name = f"step_{step_s}"
             if thread_name not in alive_threads:
-                # 스레드가 죽었는데 running 상태 → failed로 변경
+                # 스레드가 죽음 → 파일에서 최신 상태 재로드 (정상 완료 시 done으로 이미 저장됨)
                 state_w = load_state(output_dir)
-                state_w["step_status"][step_s] = "failed"
-                state_w["error"] = state_w.get("error") or "스레드가 예기치 않게 종료됨 — 로그를 확인하세요"
-                save_state(output_dir, state_w)
+                current_status = state_w["step_status"].get(step_s, "running")
+                if current_status == "running":
+                    # 파이프라인이 아직 업데이트 안 함 → 예기치 않은 종료로 간주
+                    state_w["step_status"][step_s] = "failed"
+                    state_w["error"] = state_w.get("error") or "스레드가 예기치 않게 종료됨 — 로그를 확인하세요"
+                    save_state(output_dir, state_w)
+                # done/waiting_review면 그대로 두고 새로고침만
                 st.rerun()
                 return
         time.sleep(2)
