@@ -74,6 +74,9 @@ YTDLP_CLIP_DURATION = 8     # 클립 추출 길이 (초)
 YTDLP_FORMAT = "bestvideo[height<=1080]+bestaudio/best[height<=1080]"
 ASSET_VIDEO_TARGET = 10     # 영상 에셋 목표 개수
 ASSET_IMAGE_TARGET = 10     # 이미지 에셋 목표 개수
+# YouTube 봇 차단 우회: cookies.txt (Netscape 형식). Streamlit secrets에 YT_COOKIES로 내용 저장 가능
+YT_COOKIES_PATH = _get("YT_COOKIES_PATH", "")  # credentials/yt_cookies.txt
+YT_COOKIES = _get("YT_COOKIES", "")            # secrets에 cookies 전체 내용
 
 # ── 영상 편집 설정 ──
 CROSSFADE_DURATION = 0.4     # 씬 전환 페이드 (초)

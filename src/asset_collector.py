@@ -28,6 +28,22 @@ import config
 
 console = Console()
 
+
+def _get_yt_cookies_args() -> list[str]:
+    """YouTube 봇 차단 우회용 쿠키. YT_COOKIES_PATH 또는 YT_COOKIES(secrets) 사용."""
+    if config.YT_COOKIES_PATH:
+        p = Path(config.YT_COOKIES_PATH)
+        if not p.is_absolute():
+            p = config.BASE_DIR / p
+        if p.exists():
+            return ["--cookies", str(p)]
+    if config.YT_COOKIES and config.YT_COOKIES.strip():
+        fd, path = tempfile.mkstemp(suffix=".txt", prefix="yt_cookies_")
+        with open(fd, "w", encoding="utf-8") as f:
+            f.write(config.YT_COOKIES.strip())
+        return ["--cookies", path]
+    return []
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # 1층 필터: 범용 차단 키워드 (모든 토픽에 적용)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -65,6 +81,7 @@ def search_youtube_metadata(queries: list[str], max_per_query: int = 5) -> list[
     seen_urls: set[str] = set()
     results: list[dict] = []
 
+    cookies_args = _get_yt_cookies_args()
     for query in queries:
         try:
             cmd = [
@@ -75,7 +92,7 @@ def search_youtube_metadata(queries: list[str], max_per_query: int = 5) -> list[
                 "--no-download",
                 "--quiet",
                 "--no-warnings",
-            ]
+            ] + cookies_args
             proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
             if proc.returncode != 0:
                 continue
@@ -265,14 +282,16 @@ def download_official_videos(
         output_path = assets_dir / f"pool_video_{idx:02d}.mp4"
 
         try:
+            # 단일 스트림 포맷 우선 (병합 없음) — ffmpeg exit 8 방지 (Streamlit Cloud 등)
+            # bestvideo+bestaudio 병합 시 download-sections와 충돌 → best 단일파일 사용
+            cookies_args = _get_yt_cookies_args()
             cmd = [
                 "yt-dlp", v["url"],
-                "--format", "bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4][height<=1080]/best[height<=1080]",
-                "--merge-output-format", "mp4",
-                "--download-sections", f"*0-{duration}",
+                "--format", "best[ext=mp4][height<=1080]/best[height<=1080]/best",
+                "--download-sections", f"0-{duration}",
                 "--output", str(output_path),
                 "--no-playlist", "--quiet", "--no-warnings",
-            ]
+            ] + cookies_args
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=90)
             if result.returncode == 0 and output_path.exists() and output_path.stat().st_size > 10000:
                 downloaded.append({

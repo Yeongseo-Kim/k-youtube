@@ -92,7 +92,10 @@ YOUTUBE_TRENDING_QUERIES = [
 
 def fetch_youtube_trending(max_results: int = 5) -> list[dict]:
     """yt-dlp로 YouTube 트렌딩 K-content 영상 제목 수집"""
+    from src.asset_collector import _get_yt_cookies_args
+
     videos = []
+    cookies_args = _get_yt_cookies_args()
 
     for query in YOUTUBE_TRENDING_QUERIES:
         try:
@@ -103,7 +106,7 @@ def fetch_youtube_trending(max_results: int = 5) -> list[dict]:
                 "--no-download",
                 "--quiet",
                 "--no-warnings",
-            ]
+            ] + cookies_args
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
             if result.returncode == 0:
                 for line in result.stdout.strip().split("\n"):
