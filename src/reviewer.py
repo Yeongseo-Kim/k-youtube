@@ -23,7 +23,7 @@ REVIEW_PROMPTS = {
         "criteria": """Evaluate this YouTube Shorts script on:
 1. HOOK strength (1-25): Does the opening sentence stop scrolling?
 2. CLARITY (1-25): Is it understandable for non-Korean viewers?
-3. PACING (1-25): Right word count (150-160), good flow?
+3. PACING (1-25): Right word count (70-110), good flow?
 4. ENGAGEMENT (1-25): Emotional pull, curiosity gap, CTA?
 
 Total: 100 points. Pass threshold: 70.""",

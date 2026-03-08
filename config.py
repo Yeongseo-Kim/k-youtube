@@ -55,7 +55,7 @@ DRY_RUN = os.getenv("DRY_RUN", "false").lower() == "true"
 MAX_DAILY_VIDEOS = int(os.getenv("MAX_DAILY_VIDEOS", "2"))
 
 # ── 콘텐츠 설정 ──
-SCRIPT_WORD_COUNT = (90, 100)  # 약 40~45초 분량 영문 내레이션 (빠른 속도용)
+SCRIPT_WORD_COUNT = (70, 110)  # 25~30초 분량 영문 내레이션 (쇼츠 최적화)
 VIDEO_RESOLUTION = (1080, 1920)  # 9:16 세로 (width, height)
 VIDEO_FPS = 30
 VIDEO_MAX_DURATION = 60  # 초

@@ -2,7 +2,7 @@
 [모듈 2] 대본/프롬프트 생성 — GPT-4o 기반
 
 트렌딩 토픽을 입력받아:
-1. script.txt — 150~160단어 영문 내레이션 대본 (Hook→Context→Detail→CTA)
+1. script.txt — 70~110단어 영문 내레이션 대본 (Hook→Context→Main Content→Rehook→CTA)
 2. assets_plan.json — 씬별 yt-dlp 검색어 + 이미지 폴백 키워드
 3. metadata.json — 유튜브 제목, 설명(#Shorts), 태그
 를 동시에 생성한다.
@@ -279,8 +279,8 @@ def generate_script_and_plan(topic: dict, feedback: str = "") -> dict:
     if web_context:
         news_context += f"\n\n{web_context}"
 
-    prompt = f"""You are a viral YouTube Shorts creator who has 5M+ subscribers covering K-pop and K-drama.
-Your audience is passionate international K-fans aged 15-28. They're deeply invested in idol culture.
+    prompt = f"""You are a YouTube Shorts creator in your 20s who loves Korean culture — K-dramas, K-pop, Korean entertainment, and trends.
+Your audience is global fans interested in Korean content. Tone: energetic, conversational, engaging, easy to understand for international viewers.
 
 TOPIC:
 Headline: {topic.get('headline', '')}
@@ -289,58 +289,46 @@ Keywords: {', '.join(topic.get('keywords', []))}
 Why it's viral: {topic.get('why_viral', '')}
 
 ════════════════════════════════════════
-REAL KOREAN NEWS & WEB CONTEXT (Must base facts on this):
+REAL KOREAN NEWS & WEB CONTEXT (Your ONLY source — base ALL facts on this):
 ════════════════════════════════════════
 {news_context}
 
 ════════════════════════════════════════
-CONTENT GUIDELINES — READ CAREFULLY:
+SOURCE RULES:
 ════════════════════════════════════════
-
-✅ TONE: You are a friendly, genuine K-pop fan sharing news with other fans.
-   Speak naturally and conversationally, but with ZERO FILLER. Every single sentence MUST contain a hard fact.
-   Show brief, natural empathy (e.g., "She overcame cervical cancer, which makes this even more amazing!").
-   Do NOT sound like a rigid news reporter. Keep it heartfelt but purely informational.
-   [CTA]: End exactly with this or a close variation: "Follow and leave a supportive comment!"
-
-✅ CONTENT: Base everything STRICTLY on the "REAL KOREAN NEWS & WEB CONTEXT":
-   - Weave the facts together into a single, logical, and chronological story.
-   - FATAL ERROR if you include generic filler sentences like "Fans are taking to social media to celebrate." or "The K-pop community is sending love."
-   - DO NOT include ANY sentence that does not contain a specific proper noun, date, number, or direct quote from the news.
-   - If the news says fans reacted, quote EXACTLY what the reaction was. Do not just say "fans reacted warmly."
-
- ❌ DO NOT:
-    - Include any generic, empty filler sentences that add zero new information.
-    - Hallucinate, invent, or create fake rumors. Assume nothing outside the provided news text.
+- Use the reference material above as the PRIMARY and ONLY source of information.
+- Do NOT copy sentences directly. Paraphrase.
+- Do NOT invent facts or details. If information is not in the reference, omit it.
+- Every sentence MUST contain a specific proper noun, date, number, or direct quote from the news.
+- NO generic filler (e.g., "Fans are celebrating" or "The K-pop community is sending love").
 
 ════════════════════════════════════════
+SCRIPT GUIDELINES:
+════════════════════════════════════════
+- Length: {min_words}-{max_words} words. Sentences: 6-12 words each.
+- Style: fast-paced, conversational, engaging. NO long explanations, speculation, or filler.
+- CRITICAL: Prioritize viewer retention and curiosity over detailed explanation.
+
+SCRIPT STRUCTURE (follow this order):
+1. HOOK — Capture attention immediately. Introduce the topic with a shocking, surprising, or heartwarming fact. Make it a "you won't believe this" moment.
+2. CONTEXT — Briefly explain why the topic matters.
+3. MAIN CONTENT — Present key information in 3-5 concise points. Each point = hard fact from the news. NO FILLER.
+4. REHOOK — Reinforce the significance or excitement of the topic.
+5. CTA — MUST include: (a) one question to the viewer, (b) follow/subscribe request, (c) share request. Example: "What did you think? Follow for more K-content and share if you loved it!"
+
 ════════════════════════════════════════
 OUTPUT FORMAT (JSON):
 ════════════════════════════════════════
 
-1. "script": Exactly {min_words}-{max_words} words (MINIMUM {min_words} words — never shorter). Structure:
-   [HOOK - 1-2 sentences] MUST BE INCREDIBLY STRONG, DRAMATIC, OR EMOTIONAL. Grab the viewer instantly with a shocking, surprising, or heartwarming fact. Do NOT just state the news; make it a "you won't believe this" moment.
-   [DETAIL 1 - 2-3 sentences] Next hard fact/chronological event from the news. NO FILLER.
-   [DETAIL 2 - 2-3 sentences] Additional details (quotes, numbers, specific context) from the news. NO FILLER.
-   [CTA - 1 sentence] "Follow and leave a supportive comment!"
+1. "script": Exactly {min_words}-{max_words} words. Structure: Hook → Context → Main Content (3-5 points) → Rehook → CTA.
 
-
-2. "title_options": Array of 3 YouTube title candidates.
-   SHORTS RULE: MAX 55 CHARACTERS each (excluding hashtags at the end).
-   CRITICAL: Make ANYONE click — even people who have NEVER heard of K-pop.
-   Primary keyword (Korean/K-pop/K-drama) MUST be within FIRST 35 characters.
-   Style guide — combine SPECIFIC FACT + SHOCK/INTRIGUE like these examples:
+2. "title_options": Array of 3-5 YouTube title candidates.
+   - 40-60 characters each (excluding hashtags).
+   - Main keyword near the beginning. Curiosity-driven. Short and clear.
+   - Style: SPECIFIC FACT + SHOCK/INTRIGUE. Examples:
      ✅ "Korean pop star SECRET pregnancy 🤫 #Shorts"
      ✅ "K-pop star hid TWIN babies 9 months 😱 #Shorts"
-     ✅ "She was a K-pop idol—then THIS happened 😭 #Shorts"
-   Rules:
-   - Use "Korean pop star" / "K-pop star" / "Korean singer" — NOT the idol's name alone
-   - Put the SPECIFIC FACT (twins, secret, hidden, viral moment) front and center
-   - ALL CAPS 1-2 key words. 1 emoji at the very end.
-   - End EVERY title exactly with " #Shorts"
-   - Option 1: Specific fact + shock
-   - Option 2: Duration/scale
-   - Option 3: Reaction hook
+   - Use "Korean pop star" / "K-pop star" — NOT idol name alone. ALL CAPS 1-2 key words. 1 emoji. End with " #Shorts"
 
 3. "scenes": Array of 5-7 scene objects, each with:
    - "scene_id": number (1-based)
@@ -351,7 +339,7 @@ OUTPUT FORMAT (JSON):
    - "duration_hint": "3-5 seconds"
 
 4. "metadata":
-   - "title": Pick the BEST of your 3 title options (copy it exactly)
+   - "title": Pick the BEST of your title_options (copy it exactly)
    - "description": START with the primary keyword in the FIRST sentence. Repeat it 2-3 times naturally. Add a CTA. End with hashtags on a new line: #Shorts #Kpop #[Artist/Topic] #KdramaLovers
    - "tags": comma-separated tags (max 500 chars). RULE: Put the most specific primary keyword FIRST. Include artist name, long-tail, and broad tags (kpop, kdrama, korean celebrity). NO "#" symbol here.
 

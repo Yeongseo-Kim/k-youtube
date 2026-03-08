@@ -31,8 +31,8 @@ REDDIT_SUBREDDITS = [
     "kpop",
     "kdrama",
     "koreanvariety",
-    "bangtan",        # BTS 관련
-    "kpopthoughts",   # 팬 반응/의견
+    "koreanfood",
+    "koreatravel",
 ]
 
 def fetch_reddit_trending(hours: int = 24, limit: int = 10) -> list[dict]:
@@ -85,9 +85,10 @@ def fetch_reddit_trending(hours: int = 24, limit: int = 10) -> list[dict]:
 # ─────────────────────────────────────────────────────
 
 YOUTUBE_TRENDING_QUERIES = [
-    "kpop 2026",
-    "kdrama 2026",
-    "korean idol",
+    "kpop",
+    "kdrama",
+    "korean food",
+    "korea travel",
 ]
 
 def fetch_youtube_trending(max_results: int = 5) -> list[dict]:
@@ -130,7 +131,7 @@ def fetch_youtube_trending(max_results: int = 5) -> list[dict]:
 # 소스 3: Google Trends (pytrends)
 # ─────────────────────────────────────────────────────
 
-GTRENDS_KEYWORDS = ["kpop", "kdrama", "BTS", "blackpink", "korean drama"]
+GTRENDS_KEYWORDS = ["kpop", "kdrama", "korean food", "korea travel", "korean culture"]
 
 def fetch_google_trends() -> list[dict]:
     """Google Trends에서 K-content 관련 급상승 검색어 수집"""

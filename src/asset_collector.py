@@ -267,6 +267,8 @@ def download_official_videos(
     """official/media 채널 영상만 점수 순으로 다운로드."""
     downloaded: list[dict] = []
     duration = config.YTDLP_CLIP_DURATION
+    m, s = divmod(duration, 60)
+    section_arg = f"*0:00-{m}:{s:02d}"  # 시간 기반 구간 (챕터 없어도 동작)
 
     for v in scored_videos:
         if len(downloaded) >= max_count:
@@ -288,9 +290,9 @@ def download_official_videos(
             cmd = [
                 "yt-dlp", v["url"],
                 "--format", "best[ext=mp4][height<=1080]/best[height<=1080]/best",
-                "--download-sections", f"0-{duration}",
+                "--download-sections", section_arg,
                 "--output", str(output_path),
-                "--no-playlist", "--quiet", "--no-warnings",
+                "--no-playlist", "--no-warnings",
             ] + cookies_args
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=90)
             if result.returncode == 0 and output_path.exists() and output_path.stat().st_size > 10000:
@@ -309,7 +311,7 @@ def download_official_videos(
                 console.print(f"  [green]  ✓ {type_icon} [{v.get('relevance_score',0)}/10] {v['channel']}: {v['title'][:45]}[/green]")
             else:
                 output_path.unlink(missing_ok=True)
-                err_hint = (result.stderr or result.stdout or "")[:150].replace("\n", " ")
+                err_hint = (result.stderr or result.stdout or "").strip().replace("\n", " ")[:400]
                 size_hint = ""
                 if output_path.exists():
                     try:
