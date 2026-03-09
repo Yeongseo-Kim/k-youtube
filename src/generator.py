@@ -215,6 +215,46 @@ def fetch_web_snippets_context(query: str, max_articles: int = 4) -> str:
         return ""
 
 
+def build_deduplicated_news_context(client, raw_context: str, topic: dict) -> str:
+    """GPT로 기사·웹 컨텍스트를 중복 제거하고 이야기 순서로 정리한 통합본 생성.
+    이 통합본을 대본 생성의 유일한 참조로 사용한다.
+    """
+    if not raw_context or len(raw_context.strip()) < 50:
+        return raw_context
+
+    topic_headline = topic.get("headline_ko") or topic.get("headline", "")
+
+    dedup_prompt = f"""You are a news editor. Below are multiple news articles and web snippets about a K-content topic.
+Your task: Create a SINGLE, DEDUPLICATED narrative that:
+1. Merges overlapping facts — if multiple articles say the same thing, state it ONCE.
+2. Arranges the story in a clear narrative order (chronological or cause→effect).
+3. Excludes irrelevant content (e.g. song lyrics, unrelated topics).
+4. Keeps all specific facts: names, dates, numbers, quotes.
+5. PRIORITIZE angles that are VISUAL: pictorials, photoshoots, MVs, performances, concerts, fashion, BTS, red carpet. Overseas K-pop fans want to SEE things — not just chart numbers.
+6. Output in the SAME language as the source (Korean if Korean, English if English). Mix is OK if sources are mixed.
+
+Topic anchor: {topic_headline}
+
+RAW SOURCES:
+{raw_context[:12000]}
+
+Output ONLY the deduplicated narrative. No headers, no "Summary:", no explanations. Just the clean story."""
+
+    try:
+        resp = client.chat.completions.create(
+            model=config.LLM_MODEL,
+            messages=[{"role": "user", "content": dedup_prompt}],
+            temperature=0.3,
+        )
+        merged = resp.choices[0].message.content.strip()
+        if merged and len(merged) > 50:
+            console.print("  [dim]✓ GPT 통합본 생성 (중복 제거·이야기 배열 완료)[/dim]")
+            return merged
+    except Exception as e:
+        console.print(f"[yellow]⚠ 통합본 생성 실패, 원본 사용: {e}[/yellow]")
+    return raw_context
+
+
 def generate_script_and_plan(topic: dict, feedback: str = "") -> dict:
     """GPT-4o로 대본 + 에셋 플랜 + 메타데이터를 한 번에 생성"""
     client = OpenAI(api_key=config.OPENAI_API_KEY)
@@ -267,31 +307,55 @@ def generate_script_and_plan(topic: dict, feedback: str = "") -> dict:
                     news_articles.append(a)
                     existing_urls.add(a['url'])
 
-    # 통합본 재구성
+    # 통합본 재구성 (원본)
     if news_articles:
-        news_context = "\n\n".join(
+        raw_context = "\n\n".join(
             f"[기사 {a['index']}]\n제목: {a['title']}\n내용(전문 요약):\n{a['body']}"
             for a in news_articles
         )
+    else:
+        raw_context = news_context
 
     # + 추가: 웹/소셜 글 (잡지, 인스타 PR 등) 스니펫 수집
     web_context = fetch_web_snippets_context(primary_query, max_articles=6)
     if web_context:
-        news_context += f"\n\n{web_context}"
+        raw_context += f"\n\n{web_context}"
+
+    # GPT로 중복 제거·이야기 순서 배열한 통합본 생성 → 이걸 참고해서 대본 작성
+    news_context = build_deduplicated_news_context(client, raw_context, topic)
 
     prompt = f"""You are a YouTube Shorts creator in your 20s who loves Korean culture — K-dramas, K-pop, Korean entertainment, and trends.
-Your audience is global fans interested in Korean content. Tone: energetic, conversational, engaging, easy to understand for international viewers.
+Your audience is overseas K-pop fans who want content they can SEE and FEEL. Tone: energetic, conversational, engaging, easy to understand for international viewers.
 
-TOPIC:
+VISUAL-FIRST RULE (CRITICAL for Shorts):
+- Prioritize content that can be shown VISUALLY: pictorials, photoshoots, music videos, performances, fashion, behind-the-scenes, red carpet, variety moments, dance practices, concert clips.
+- AVOID topics that are mostly numbers (chart rankings, view counts, sales figures) unless tied to a strong visual moment (e.g. "MV that broke records" + show the MV).
+- Pick the angle that has the most VISUAL material: what would look good on screen?
+
+TOPIC (search anchor only — the NEWS is your real story):
 Headline: {topic.get('headline', '')}
 Summary: {topic.get('summary', '')}
 Keywords: {', '.join(topic.get('keywords', []))}
 Why it's viral: {topic.get('why_viral', '')}
 
 ════════════════════════════════════════
-REAL KOREAN NEWS & WEB CONTEXT (Your ONLY source — base ALL facts on this):
+DEDUPLICATED NEWS NARRATIVE (통합본 — Your ONLY reference for the script):
 ════════════════════════════════════════
+The text below is a merged, deduplicated story from multiple articles. Use it as your sole source.
 {news_context}
+
+════════════════════════════════════════
+STEP 0 (do this mentally before writing):
+════════════════════════════════════════
+- Scan the narrative above. Find: (a) the most shocking fact, (b) a direct quote if any, (c) the core hook.
+- Your script's first sentence MUST be built from (a), (b), or (c). No generic opener.
+
+════════════════════════════════════════
+NEWS-FIRST RULE (CRITICAL):
+════════════════════════════════════════
+- The topic summary is ONLY a search anchor. The NEWS ARTICLES are your real story.
+- If the news has a different or MORE compelling angle than the topic, USE THE NEWS.
+- Before writing anything, identify the SINGLE most shocking/emotional/dramatic fact from the news. Your script MUST open with that.
 
 ════════════════════════════════════════
 SOURCE RULES:
@@ -299,7 +363,7 @@ SOURCE RULES:
 - Use the reference material above as the PRIMARY and ONLY source of information.
 - Do NOT copy sentences directly. Paraphrase.
 - Do NOT invent facts or details. If information is not in the reference, omit it.
-- Every sentence MUST contain a specific proper noun, date, number, or direct quote from the news.
+- Every sentence MUST feel like NEWS: specific names, dates, numbers, or a direct/paraphrased quote. NO generic praise.
 - NO generic filler (e.g., "Fans are celebrating" or "The K-pop community is sending love").
 
 ════════════════════════════════════════
@@ -308,11 +372,12 @@ SCRIPT GUIDELINES:
 - Length: {min_words}-{max_words} words. Sentences: 6-12 words each.
 - Style: fast-paced, conversational, engaging. NO long explanations, speculation, or filler.
 - CRITICAL: Prioritize viewer retention and curiosity over detailed explanation.
+- VISUAL ANGLE: Each point in the script should describe something we can SHOW — pictorials, MVs, performances, fashion, BTS, concert footage. Avoid script lines that are just numbers with nothing to show.
 
 SCRIPT STRUCTURE (follow this order):
-1. HOOK — Capture attention immediately. Introduce the topic with a shocking, surprising, or heartwarming fact. Make it a "you won't believe this" moment.
+1. HOOK — Open with the most surprising fact from the news. If the article has a headline like "X did Y for the first time in 10 years", that IS your hook. No generic opener.
 2. CONTEXT — Briefly explain why the topic matters.
-3. MAIN CONTENT — Present key information in 3-5 concise points. Each point = hard fact from the news. NO FILLER.
+3. MAIN CONTENT — 3-5 concise points. Each point = something we can SHOW: pictorial, MV, performance, concert, fashion, BTS moment. Avoid points that are purely numbers (chart rank, view count) unless tied to a visual moment.
 4. REHOOK — Reinforce the significance or excitement of the topic.
 5. CTA — MUST include: (a) one question to the viewer, (b) follow/subscribe request, (c) share request. Example: "What did you think? Follow for more K-content and share if you loved it!"
 
@@ -323,20 +388,24 @@ OUTPUT FORMAT (JSON):
 1. "script": Exactly {min_words}-{max_words} words. Structure: Hook → Context → Main Content (3-5 points) → Rehook → CTA.
 
 2. "title_options": Array of 3-5 YouTube title candidates.
-   - 40-60 characters each (excluding hashtags).
-   - Main keyword near the beginning. Curiosity-driven. Short and clear.
-   - Style: SPECIFIC FACT + SHOCK/INTRIGUE. Examples:
-     ✅ "Korean pop star SECRET pregnancy 🤫 #Shorts"
-     ✅ "K-pop star hid TWIN babies 9 months 😱 #Shorts"
-   - Use "Korean pop star" / "K-pop star" — NOT idol name alone. ALL CAPS 1-2 key words. 1 emoji. End with " #Shorts"
+   TITLE RULES (news-driven):
+   - The best title often comes FROM the news: the article headline, a key quote, or the most dramatic fact.
+   - Before writing titles, ask: "What line from the news would make ME click?"
+   - Avoid template-style titles. Prefer the news angle over the topic summary.
+   - 40-60 characters each (excluding hashtags). Main keyword near the beginning.
+   - ALL CAPS 1-2 key words. 1 emoji. End with " #Shorts"
+   - Examples of news-driven vs generic:
+     ✅ "TWICE BANNED from Taiwan for 10 years — until NOW 😱 #Shorts" (from news)
+     ❌ "Which KPOP MV Breaks 100 MILLION Views? 🚀 #Shorts" (generic, not from news)
 
-3. "scenes": Array of 5-7 scene objects, each with:
+3. "scenes": Array of 5-7 scene objects. Each scene MUST be something VISUAL we can show on screen.
    - "scene_id": number (1-based)
-   - "description": what should appear on screen (be specific)
-   - "youtube_query": yt-dlp search term — VERY specific (e.g. "Crayon Pop Choa twin pregnancy reveal 2026")
-   - "youtube_query_ko": 같은 내용의 한국어 YouTube 검색어 (e.g. "크레용팝 초아 쌍둥이 임신 공개")
-   - "image_query": fallback image search term
+   - "description": what should appear on screen — prefer: pictorial, photoshoot, MV clip, performance, concert, fashion, BTS, red carpet, variety moment, dance practice
+   - "youtube_query": yt-dlp search term — target VISUAL content: "[artist] pictorial", "[artist] photoshoot", "[artist] MV", "[artist] performance", "[artist] concert", "[artist] behind the scenes", "[artist] dance practice"
+   - "youtube_query_ko": 같은 내용의 한국어 YouTube 검색어 (화보, 무대, 콘서트, 뮤비, 비하인드 등)
+   - "image_query": fallback — "[artist] pictorial", "[artist] photoshoot", "[artist] magazine cover", "[artist] fashion"
    - "duration_hint": "3-5 seconds"
+   AVOID scenes that are just numbers/charts — we need footage or images to show.
 
 4. "metadata":
    - "title": Pick the BEST of your title_options (copy it exactly)

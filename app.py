@@ -823,23 +823,35 @@ Return JSON: {{"scenes": [{{"scene_id": 1, "description": "...", "youtube_query"
             with col_t2:
                 if st.button("🔄 제목 3개 재생성", use_container_width=True, key="regen_titles"):
                     script_text2 = (output_dir / "script.txt").read_text(encoding="utf-8") if (output_dir / "script.txt").exists() else ""
+                    news_context_path = output_dir / "news_context.txt"
+                    news_articles_path = output_dir / "news_articles.json"
+                    news_snippet = ""
+                    if news_context_path.exists():
+                        news_snippet = news_context_path.read_text(encoding="utf-8")[:800]
+                    elif news_articles_path.exists():
+                        try:
+                            arts = json.loads(news_articles_path.read_text(encoding="utf-8"))
+                            news_snippet = "\n".join(f"[{a.get('title','')}] {a.get('body','')[:200]}" for a in arts[:3])
+                        except Exception:
+                            pass
+                    title_prompt_base = (
+                        f"Generate 3 DIFFERENT YouTube Shorts title options.\n"
+                        f"Rules: ONE word ALL CAPS. Max 60 chars. Specific detail. Avoid repeating: {edited_title}\n"
+                        f"Script: {script_text2[:300]}\n"
+                    )
+                    if news_snippet:
+                        title_prompt_base += (
+                            f"\nNEWS CONTEXT (use the most click-worthy fact from this for your titles):\n{news_snippet}\n\n"
+                            "The best title often comes FROM the news. What line would make YOU click? Avoid generic templates.\n"
+                        )
+                    title_prompt_base += 'Return JSON: {"title_options": ["...", "...", "..."]}'
                     with st.spinner("새 제목 생성 중..."):
                         try:
                             from openai import OpenAI as _OAI2
                             _c2 = _OAI2(api_key=config.OPENAI_API_KEY)
                             _r2 = _c2.chat.completions.create(
                                 model="gpt-4o-mini",
-                                messages=[{"role": "user", "content":
-                                    f"Generate 3 DIFFERENT YouTube Shorts title options.\n"
-                                    f"FORMAT — exactly like these examples (no emoji, no ?, no !):\n"
-                                    f"  'Korean pop star's SECRET pregnancy'\n"
-                                    f"  'K-pop star hid TWIN babies for 9 months'\n"
-                                    f"  'Korean idol's HIDDEN romance finally exposed'\n"
-                                    f"Rules: Subject='Korean pop star/K-pop star/Korean idol'. "
-                                    f"ONE word ALL CAPS. Max 60 chars. Specific detail.\n"
-                                    f"Avoid repeating: {edited_title}\n"
-                                    f"Script: {script_text2[:300]}\n"
-                                    f'Return JSON: {{"title_options": ["...", "...", "..."]}}'}],
+                                messages=[{"role": "user", "content": title_prompt_base}],
                                 response_format={"type": "json_object"},
                                 temperature=1.0,
                             )
@@ -874,23 +886,36 @@ Return JSON: {{"scenes": [{{"scene_id": 1, "description": "...", "youtube_query"
                     script_path2 = output_dir / "script.txt"
                     topic_data = state.get("results", {})
                     script_text = script_path2.read_text(encoding="utf-8") if script_path2.exists() else ""
+                    news_context_path = output_dir / "news_context.txt"
+                    news_articles_path = output_dir / "news_articles.json"
+                    news_snippet = ""
+                    if news_context_path.exists():
+                        news_snippet = news_context_path.read_text(encoding="utf-8")[:800]
+                    elif news_articles_path.exists():
+                        try:
+                            arts = json.loads(news_articles_path.read_text(encoding="utf-8"))
+                            news_snippet = "\n".join(f"[{a.get('title','')}] {a.get('body','')[:200]}" for a in arts[:3])
+                        except Exception:
+                            pass
+                    title_auto_prompt = (
+                        f"Generate 3 DIFFERENT YouTube Shorts title options for this script.\n"
+                        f"Rules: ONE word ALL CAPS. Max 60 chars. Specific detail.\n"
+                        f"Current title: {meta.get('title', '')}\n"
+                        f"Script (first 300 chars): {script_text[:300]}\n\n"
+                    )
+                    if news_snippet:
+                        title_auto_prompt += (
+                            f"NEWS CONTEXT (use the most click-worthy fact from this for your titles):\n{news_snippet}\n\n"
+                            "The best title often comes FROM the news. What line would make YOU click? Avoid generic templates.\n"
+                        )
+                    title_auto_prompt += 'Return JSON: {"title_options": ["...", "...", "..."]}'
                     with st.spinner("GPT로 제목 3개 생성 중..."):
                         try:
                             from openai import OpenAI as _OAI
                             _client = _OAI(api_key=config.OPENAI_API_KEY)
                             _r = _client.chat.completions.create(
                                 model="gpt-4o-mini",
-                                messages=[{"role": "user", "content":
-                                    f"Generate 3 DIFFERENT YouTube Shorts title options for this script.\n"
-                                    f"FORMAT — exactly like these examples (no emoji, no ?, no !):\n"
-                                    f"  'Korean pop star's SECRET pregnancy'\n"
-                                    f"  'K-pop star hid TWIN babies for 9 months'\n"
-                                    f"  'Korean idol's HIDDEN romance finally exposed'\n"
-                                    f"Rules: Subject='Korean pop star/K-pop star/Korean idol'. "
-                                    f"ONE word ALL CAPS. Max 60 chars. Specific detail.\n"
-                                    f"Current title: {meta.get('title', '')}\n"
-                                    f"Script (first 300 chars): {script_text[:300]}\n\n"
-                                    f'Return JSON: {{"title_options": ["...", "...", "..."]}}'}],
+                                messages=[{"role": "user", "content": title_auto_prompt}],
                                 response_format={"type": "json_object"},
                                 temperature=0.9,
                             )

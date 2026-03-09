@@ -83,7 +83,9 @@ CROSSFADE_DURATION = 0.4     # 씬 전환 페이드 (초)
 KEN_BURNS_ZOOM = 1.15        # 줌인 배율
 SUBTITLE_FONT_SIZE = 40
 SUBTITLE_FONT_COLOR = "white"
-VIDEO_BITRATE = "4M"
+# YouTube 권장: 1080p 30fps → 8Mbps, 60fps → 12Mbps (표준화질 처리 최소화)
+VIDEO_BITRATE = "8M"
+AUDIO_BITRATE = "384k"  # YouTube 권장 스테레오
 
 
 def validate():

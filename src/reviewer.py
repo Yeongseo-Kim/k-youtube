@@ -21,13 +21,14 @@ REVIEW_PROMPTS = {
     "script_editor": {
         "system": "You are a senior YouTube Shorts scriptwriter specializing in viral K-content for international audiences.",
         "criteria": """Evaluate this YouTube Shorts script on:
-1. HOOK strength (1-25): Does the opening sentence stop scrolling?
+1. HOOK strength (1-25): Does the opening sentence stop scrolling? Does it OPEN with a specific, news-sourced fact (not generic praise like "X never fails to impress")?
 2. CLARITY (1-25): Is it understandable for non-Korean viewers?
 3. PACING (1-25): Right word count (70-110), good flow?
-4. ENGAGEMENT (1-25): Emotional pull, curiosity gap, CTA?
+4. ENGAGEMENT (1-25): Emotional pull, curiosity gap, CTA? Would a viewer who read the news recognize the same story?
 
-Total: 100 points. Pass threshold: 70.""",
-        "output": "Return JSON: {score: int, passed: bool, feedback: str (2-3 specific improvement points in English)}"
+Total: 100 points. Pass threshold: 70.
+If the script starts with generic praise or ignores the news angle, deduct heavily from HOOK and ENGAGEMENT.""",
+        "output": "Return JSON: {score: int, passed: bool, feedback: str (2-3 specific improvement points in English, e.g. 'Start with the fact from the news: X did Y for the first time in 10 years')}"
     },
 
     "asset_reviewer": {

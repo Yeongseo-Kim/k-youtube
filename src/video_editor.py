@@ -238,9 +238,12 @@ def run(output_dir: Path, audio_path: Path, assets_dir: Path, subtitle_path: Pat
     thumbnail_path = output_dir / "thumbnail.png"
     has_thumb = thumbnail_path.exists()
 
-    # 4. 씬당 시간 균등 분배 (썸네일 포함 총 클립 수 기준)
+    # 4. 씬당 시간 균등 분배 — crossfade 겹침 보정으로 영상 길이 = 오디오 길이 (끝 검은 화면 방지)
+    # total_video = n * scene_duration - (n-1) * crossfade = total_duration
+    # => scene_duration = (total_duration + (n-1) * crossfade) / n
+    crossfade = config.CROSSFADE_DURATION
     total_clips = len(asset_files) + (1 if has_thumb else 0)
-    scene_duration = total_duration / total_clips
+    scene_duration = (total_duration + (total_clips - 1) * crossfade) / total_clips
 
     thumb_clip = None
     if has_thumb:
@@ -266,7 +269,6 @@ def run(output_dir: Path, audio_path: Path, assets_dir: Path, subtitle_path: Pat
         raise RuntimeError("모든 씬 로드 실패. 에셋을 확인하세요.")
 
     # 6. 클립 연결 — 썸네일 + 씬들 (crossfade)
-    crossfade = config.CROSSFADE_DURATION
     all_clips = ([thumb_clip] if thumb_clip else []) + scene_clips
     final_clip = concatenate_videoclips(
         all_clips,
@@ -289,13 +291,16 @@ def run(output_dir: Path, audio_path: Path, assets_dir: Path, subtitle_path: Pat
     output_path = output_dir / "final_video.mp4"
     console.print(f"  [dim]렌더링 중... (시간이 걸릴 수 있습니다)[/dim]")
 
+    # YouTube 권장 인코딩: H.264, moov atom 시작(빠른 처리), Edit List 없음
     final_clip.write_videofile(
         str(output_path),
         fps=config.VIDEO_FPS,
         codec="libx264",
         audio_codec="aac",
         bitrate=config.VIDEO_BITRATE,
+        audio_bitrate=getattr(config, "AUDIO_BITRATE", "384k"),
         preset="fast",
+        ffmpeg_params=["-movflags", "+faststart"],  # moov atom 파일 앞쪽 → 표준화질 처리 가속
         verbose=False,
         logger=None,
     )

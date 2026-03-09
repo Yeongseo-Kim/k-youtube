@@ -10,6 +10,7 @@
 
 import json
 import argparse
+import time
 from pathlib import Path
 from rich.console import Console
 
@@ -129,6 +130,7 @@ def upload_video(
 
     console.print(f"  [dim]업로드 시작: {video_path.name} ({video_path.stat().st_size / 1024 / 1024:.1f} MB)[/dim]")
 
+    # insert에는 snippet,status만 허용 (processingDetails는 list 전용)
     request = youtube.videos().insert(
         part="snippet,status",
         body=body,
@@ -143,6 +145,53 @@ def upload_video(
             console.print(f"  [dim]  업로드 {pct}%...[/dim]", end="\r")
 
     video_id = response["id"]
+
+    # ── 자세한 API 응답 로그 (insert는 processingDetails 미반환 → list로 조회) ──
+    console.print("\n  [bold]━━ YouTube API 응답 (상세) ━━[/bold]")
+    console.print(f"  [dim]Video ID: {video_id}[/dim]")
+    status_obj = response.get("status", {})
+    upload_status = status_obj.get("uploadStatus", "?")
+    console.print(f"  [dim]uploadStatus: {upload_status}[/dim]")
+
+    # processingDetails는 insert 응답에 없음 → videos.list로 조회
+    proc_status = "?"
+    try:
+        resp = youtube.videos().list(part="status,processingDetails", id=video_id).execute()
+        if resp.get("items"):
+            item = resp["items"][0]
+            proc = item.get("processingDetails", {})
+            proc_status = proc.get("processingStatus", "?")
+            proc_progress = proc.get("processingProgress", {})
+            console.print(f"  [dim]processingStatus: {proc_status}[/dim]")
+            if proc_progress:
+                for k, v in proc_progress.items():
+                    console.print(f"  [dim]  processingProgress.{k}: {v}[/dim]")
+    except Exception as e:
+        console.print(f"  [dim]처리 상태 조회 스킵: {e}[/dim]")
+
+    # 처리 완료까지 폴링 (최대 5분)
+    if proc_status in ("processing", "pending"):
+        console.print("  [yellow]YouTube 서버 처리 대기 중... (처리 완료 시 재생 가능)[/yellow]")
+        for i in range(30):  # 30회 × 10초 = 5분
+            time.sleep(10)
+            resp = youtube.videos().list(
+                part="status,processingDetails",
+                id=video_id,
+            ).execute()
+            if not resp.get("items"):
+                break
+            item = resp["items"][0]
+            proc2 = item.get("processingDetails", {})
+            proc_status2 = proc2.get("processingStatus", proc_status)
+            proc_prog2 = proc2.get("processingProgress", {})
+            console.print(f"  [dim]  [{i+1}/30] processingStatus={proc_status2} {proc_prog2}[/dim]")
+            if proc_status2 == "succeeded":
+                console.print("  [green]✓ YouTube 처리 완료! 이제 재생 가능합니다.[/green]")
+                break
+            if proc_status2 == "failed":
+                console.print(f"  [red]✗ 처리 실패: {proc2.get('processingFailureReason', '?')}[/red]")
+                break
+
     console.print(f"\n  [green]✓ 업로드 완료! Video ID: {video_id}[/green]")
     console.print(f"  [cyan]  → https://www.youtube.com/shorts/{video_id}[/cyan]")
     return video_id
