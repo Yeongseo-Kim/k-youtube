@@ -94,7 +94,7 @@ def create_task(
     ratio: str = "9:16",
     duration: int = 5,
     generate_audio: bool = False,
-    camera_fixed: bool = False,
+    camera_fixed: bool | None = None,
     watermark: bool = False,
     seed: int | None = None,
     task_type: TaskType = "reference",
@@ -133,10 +133,12 @@ def create_task(
         "resolution": resolution,
         "ratio": ratio,
         "duration": duration,
-        "camera_fixed": camera_fixed,
         "watermark": watermark,
         "generate_audio": generate_audio,
     }
+    # camera_fixed는 모델·태스크 조합에 따라 미지원(mini의 i2v 등) — 지정할 때만 보낸다
+    if camera_fixed is not None:
+        payload["camera_fixed"] = camera_fixed
     if seed is not None:
         payload["seed"] = seed
     if reference_images:
