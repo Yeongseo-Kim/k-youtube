@@ -40,6 +40,12 @@ WHISPER_MODEL = "whisper-1"
 GEMINI_API_KEY = _get("GEMINI_API_KEY")
 GEMINI_IMAGE_MODEL = _get("GEMINI_IMAGE_MODEL") or "gemini-2.5-flash-image"
 
+# ── BytePlus ModelArk (Seedance 영상 생성) ──
+MODELARK_API_KEY = _get("MODELARK_API_KEY")
+MODELARK_BASE_URL = _get("MODELARK_BASE_URL") or "https://ark.ap-southeast.bytepluses.com/api/v3"
+# 캐릭터 락(omni reference-to-video) 지원 + 최저가 모델
+MODELARK_VIDEO_MODEL = _get("MODELARK_VIDEO_MODEL") or "dreamina-seedance-2-0-mini-260615"
+
 # ── YouTube ──
 _yt_secret_raw = _get("YOUTUBE_CLIENT_SECRET") or "credentials/youtube_oauth.json"
 YOUTUBE_CLIENT_SECRET = str(BASE_DIR / _yt_secret_raw) if not os.path.isabs(_yt_secret_raw) else _yt_secret_raw
