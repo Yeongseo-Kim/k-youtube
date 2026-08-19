@@ -1,0 +1,155 @@
+"""
+[조립] episode-001 — 생성된 컷들을 트림·자막·전환으로 이어 붙여 완성본을 만든다.
+
+보이스/BGM은 별도로 입히므로 여기서는 무음 영상 + 자막까지만 처리한다.
+moviepy 대신 ffmpeg을 직접 호출한다(빌드 실패 회피 + 트림 정밀도).
+
+실행: python3 -m src.assemble_ep001
+"""
+
+import shutil
+import subprocess
+from pathlib import Path
+
+from rich.console import Console
+
+console = Console()
+
+# drawtext 필터(freetype)가 필요하므로 시스템 ffmpeg을 쓴다.
+# imageio-ffmpeg 번들 바이너리에는 drawtext가 빠져 있다.
+FFMPEG = shutil.which("ffmpeg")
+if not FFMPEG:
+    raise RuntimeError("ffmpeg을 찾을 수 없습니다. apt-get install ffmpeg 로 설치하세요.")
+FONT_BOLD = "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc"
+
+SRC_DIR = Path("output/ep001")
+WORK_DIR = SRC_DIR / "work"
+FINAL = SRC_DIR / "episode-001.mp4"
+
+W, H = 720, 1280
+# 쇼츠 세이프존: 상단 15%(192px), 하단 20%(256px)는 UI가 가린다
+Y_TOPIC = 235      # 주제 자막 (상단 세이프존 아래)
+Y_SUB = 950        # 보조 자막 (하단 세이프존 위)
+Y_WARN = 330       # 안전 경고
+
+# 컷 구성: (파일, 사용 길이, 자막 목록)
+# 자막: (텍스트, 시작초, 지속초, 크기, y좌표, 글자색, 박스색)
+CUTS = [
+    ("cut1.mp4", 3.8, [
+        ("솔로 문질러도 안 지워지는 이유", 0.6, 3.2, 46, Y_TOPIC, "white", "black@0.55"),
+    ]),
+    ("cut2.mp4", 5.0, [
+        ("물부터 내린다", 0.3, 4.4, 34, Y_SUB, "white", "black@0.5"),
+    ]),
+    ("C3_spray_tissue.mp4", 7.8, [
+        ("휴지 덮고 20분", 1.0, 6.5, 50, Y_TOPIC, "white", "black@0.55"),
+        ("구연산 15~30g + 물 500mL", 2.0, 5.5, 30, Y_SUB, "white", "black@0.5"),
+        # 산성 세제를 쓰는 영상이라 안전 조건은 같은 주제 안에 반드시 들어가야 한다.
+        # 스치듯 지나가면 안 읽히므로 1.8초 노출.
+        ("락스와 같이 쓰지 말 것 · 염소가스", 4.5, 1.8, 32, Y_WARN, "white", "red@0.75"),
+    ]),
+    ("__timecard__", 1.0, [
+        ("20분 후", 0.0, 1.0, 56, 600, "white", "black@0.6"),
+    ]),
+    ("C4_peel_result.mp4", 5.5, [
+        ("이제 한 번만 문질러", 0.8, 4.0, 46, Y_TOPIC, "white", "black@0.55"),
+    ]),
+    ("B2_chestup_rise.mp4", 5.5, []),
+]
+
+
+def run(args: list[str]) -> None:
+    """ffmpeg 호출. 실패 시 stderr를 그대로 노출한다."""
+    result = subprocess.run(args, capture_output=True, text=True)
+    if result.returncode != 0:
+        console.print(f"[red]✗ ffmpeg 실패[/red]\n{result.stderr[-1500:]}")
+        raise RuntimeError("ffmpeg 실패")
+
+
+def escape(text: str) -> str:
+    """drawtext 필터용 이스케이프."""
+    return text.replace("\\", "\\\\").replace(":", "\\:").replace("'", "’")
+
+
+def build_drawtext(subs: list[tuple]) -> str:
+    """자막 목록을 drawtext 필터 체인으로 변환."""
+    parts = []
+    for text, start, dur, size, y, color, box in subs:
+        parts.append(
+            f"drawtext=fontfile={FONT_BOLD}:text='{escape(text)}':"
+            f"fontsize={size}:fontcolor={color}:x=(w-text_w)/2:y={y}:"
+            f"box=1:boxcolor={box}:boxborderw=18:"
+            f"enable='between(t,{start},{start + dur})'"
+        )
+    return ",".join(parts)
+
+
+def make_timecard(source: Path, output: Path, duration: float) -> None:
+    """직전 컷의 마지막 프레임을 정지시켜 시간 경과 카드를 만든다.
+
+    결과가 즉효처럼 보이면 조작 의심을 사므로, 시간이 걸린다는 것을 명시한다.
+    """
+    still = WORK_DIR / "timecard_still.png"
+    run([FFMPEG, "-y", "-v", "error", "-sseof", "-0.5", "-i", str(source),
+         "-vsync", "0", "-frames:v", "1", "-update", "1", str(still)])
+    run([FFMPEG, "-y", "-v", "error", "-loop", "1", "-t", str(duration), "-i", str(still),
+         "-vf", f"scale={W}:{H},eq=brightness=-0.06", "-r", "30",
+         "-c:v", "libx264", "-pix_fmt", "yuv420p", str(output)])
+
+
+def prepare_cut(index: int, name: str, duration: float, subs: list[tuple]) -> Path:
+    """컷 하나를 트림 + 자막 처리해 중간 파일로 저장한다.
+
+    끝부분 트림이 중요하다 — AI 생성 영상은 마지막 몇 프레임에서 동작이
+    뭉개지는 경우가 잦아, 잘라내야 이어 붙였을 때 깔끔하다.
+    """
+    output = WORK_DIR / f"{index:02d}_{Path(name).stem}.mp4"
+
+    if name == "__timecard__":
+        raw = WORK_DIR / f"{index:02d}_timecard_raw.mp4"
+        make_timecard(WORK_DIR / "02_C3_spray_tissue.mp4", raw, duration)
+        source = raw
+    else:
+        source = SRC_DIR / name
+
+    vf = f"scale={W}:{H},fps=30"
+    drawtext = build_drawtext(subs)
+    if drawtext:
+        vf = f"{vf},{drawtext}"
+
+    run([FFMPEG, "-y", "-v", "error", "-i", str(source), "-t", str(duration),
+         "-vf", vf, "-an",
+         "-c:v", "libx264", "-preset", "medium", "-crf", "20",
+         "-pix_fmt", "yuv420p", str(output)])
+
+    console.print(f"  [green]✓[/green] [{index}] {name} → {duration}초")
+    return output
+
+
+def main() -> Path:
+    console.print("\n[bold blue]━━ episode-001 조립 ━━[/bold blue]\n")
+    WORK_DIR.mkdir(parents=True, exist_ok=True)
+
+    segments = []
+    for i, (name, duration, subs) in enumerate(CUTS):
+        segments.append(prepare_cut(i, name, duration, subs))
+
+    concat_list = WORK_DIR / "concat.txt"
+    concat_list.write_text(
+        "".join(f"file '{p.resolve()}'\n" for p in segments), encoding="utf-8"
+    )
+
+    run([FFMPEG, "-y", "-v", "error", "-f", "concat", "-safe", "0",
+         "-i", str(concat_list), "-c", "copy", str(FINAL)])
+
+    total = sum(d for _, d, _ in CUTS)
+    size_mb = FINAL.stat().st_size / 1e6
+    console.print(
+        f"\n[bold green]✓ 완성: {FINAL}[/bold green]  "
+        f"[dim]{total:.1f}초 / {size_mb:.1f}MB / {W}x{H}[/dim]\n"
+    )
+    return FINAL
+
+
+if __name__ == "__main__":
+    main()
