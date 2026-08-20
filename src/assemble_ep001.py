@@ -43,7 +43,7 @@ CUTS = [
     ]),
     ("cut2.mp4", 5.0, [
         ("이거 물때 아니야. 요석이야.", 0.3, 2.2, 42, Y_TOPIC, "white", "black@0.55"),
-        ("락스로는 색만 빠져", 2.7, 2.1, 34, Y_SUB, "white", "black@0.5"),
+        ("락스는 소용없어", 2.7, 2.1, 34, Y_SUB, "white", "black@0.5"),
     ]),
     ("C3_spray_tissue.mp4", 7.8, [
         ("알칼리라서 산으로 녹여야 돼", 0.4, 2.6, 42, Y_TOPIC, "white", "black@0.55"),
@@ -60,7 +60,7 @@ CUTS = [
         ("힘 안 줘도 벗겨져", 0.6, 3.4, 46, Y_TOPIC, "white", "black@0.55"),
     ]),
     ("B2_chestup_rise.mp4", 5.5, [
-        ("…깨끗하네", 2.4, 2.1, 34, Y_SUB, "white", "black@0.5"),
+        ("…깨끗하지?", 2.4, 2.1, 34, Y_SUB, "white", "black@0.5"),
     ]),
 ]
 
@@ -139,7 +139,11 @@ def mux_voice(video: Path, output: Path) -> None:
     보이스는 컷 경계를 넘어가도 된다 — 오히려 사운드 브릿지가 되어
     컷 전환을 이어준다. BGM/효과음은 이후 단계에서 추가한다.
     """
-    from src.providers.gemini_tts import LINES, OUT_DIR as VOICE_DIR
+    from pathlib import Path as _P
+    VOICE_DIR = _P("output/ep001/voice_chaerin")
+    # 의미 단위로 묶어 생성한다 — 문장을 쪼개면 낭독조가 되어 리듬이 끊긴다
+    LINES = [("G1", 0.5, ""), ("G2", 4.2, ""), ("G3", 10.8, ""),
+             ("G4", 18.7, ""), ("G5", 25.8, "")]
 
     lines = [(start, VOICE_DIR / f"{name}.mp3")
              for name, start, _ in LINES if (VOICE_DIR / f"{name}.mp3").exists()]
