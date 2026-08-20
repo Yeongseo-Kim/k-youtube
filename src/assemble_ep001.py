@@ -139,7 +139,7 @@ def mux_voice(video: Path, output: Path) -> None:
     보이스는 컷 경계를 넘어가도 된다 — 오히려 사운드 브릿지가 되어
     컷 전환을 이어준다. BGM/효과음은 이후 단계에서 추가한다.
     """
-    from src.providers.openai_tts import LINES, OUT_DIR as VOICE_DIR
+    from src.providers.gemini_tts import LINES, OUT_DIR as VOICE_DIR
 
     lines = [(start, VOICE_DIR / f"{name}.mp3")
              for name, start, _ in LINES if (VOICE_DIR / f"{name}.mp3").exists()]
