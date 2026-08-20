@@ -24,7 +24,7 @@ console = Console()
 
 API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 MODEL = "gemini-3.1-flash-tts-preview"
-VOICE = "Leda"
+VOICE = "Zephyr"
 TEMPO = 1.12  # 생성 후 속도 보정 — atempo는 피치를 유지한다
 
 # 채택된 톤(F3): 무억양이 핵심이다. "낮게"가 아니라 "평탄하게"여야
@@ -44,7 +44,7 @@ LINES = [
     ("02_id_b", 8.0, "락스는 색만 빼거든."),
     ("03_fix_a", 10.8, "알칼리라 산으로 녹여야 돼."),
     ("03_fix_b", 14.4, "구연산 뿌리고, 휴지 덮어."),
-    ("04_result_a", 18.3, "이제 한 번만."),
+    ("04_result_a", 18.7, "이제 한 번만."),
     ("04_result_b", 20.7, "힘 안 줘도 벗겨져."),
     ("05_outro", 25.8, "…깨끗하네."),
 ]
