@@ -139,3 +139,6 @@ if __name__ == "__main__":
             console.print(f"  [red]• {e}[/red]")
     else:
         console.print("\n[bold green]✓ 모든 설정이 정상입니다.[/bold green]")
+
+# ── ElevenLabs (TTS) ──
+ELEVENLABS_API_KEY = _get("ELEVENLABS_API_KEY")
