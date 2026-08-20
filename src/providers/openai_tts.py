@@ -21,17 +21,19 @@ console = Console()
 
 # 컷별 대사 — (파일명, 영상 내 시작초, 대사)
 # 시작초는 episode-001.mp4 기준. 조립 시 이 위치에 얹는다.
+#
+# 대사는 자막과 겹치지 않게 짠다. 자막이 정보(훅·수치·경고)를 맡고
+# 대사는 캐릭터를 맡는다. CUT1의 훅 문구는 자막에 있으므로 대사는 혼잣말 한 줄만
+# 두고 침묵을 남긴다 — 훅에서는 여백이 자막을 더 세게 만든다.
 LINES = [
-    ("01_hook_a", 0.4, "…또 누레졌네."),
-    ("01_hook_b", 1.9, "닦아도 또 생기는 건, 이유가 있어."),
-    ("02_id_a", 4.1, "이건 물때가 아니라 요석이야."),
-    ("02_id_b", 6.5, "락스는 색만 빼거든."),
-    ("03_fix_a", 9.2, "알칼리라 산으로 녹여야 돼."),
-    ("03_fix_b", 11.8, "구연산 뿌리고, 휴지 덮어."),
-    ("03_fix_c", 14.2, "세로면은 그냥 흘러내리거든."),
-    ("04_result_a", 18.2, "이제 한 번만."),
-    ("04_result_b", 20.0, "힘 안 줘도 벗겨져."),
-    ("05_outro", 25.5, "…깨끗하네."),
+    ("01_hook_a", 0.5, "…또 누레졌네."),
+    ("02_id_a", 4.2, "이건 물때가 아니라 요석이야."),
+    ("02_id_b", 8.0, "락스는 색만 빼거든."),
+    ("03_fix_a", 10.8, "알칼리라 산으로 녹여야 돼."),
+    ("03_fix_b", 14.4, "구연산 뿌리고, 휴지 덮어."),
+    ("04_result_a", 18.3, "이제 한 번만."),
+    ("04_result_b", 20.7, "힘 안 줘도 벗겨져."),
+    ("05_outro", 25.8, "…깨끗하네."),
 ]
 
 # 마지막 줄만 톤이 미세하게 풀린다 — 갭모에가 이 한 줄에 걸려 있다
@@ -50,6 +52,24 @@ INSTRUCTIONS_OUTRO = (
 OUT_DIR = Path("output/ep001/voice")
 
 
+def trim_silence(path: Path) -> Path:
+    """앞뒤 무음을 잘라낸다.
+
+    OpenAI TTS는 대사 앞뒤에 0.2~1.1초의 무음을 붙인다. 그대로 두면 타이밍
+    계산이 어긋나고 대사끼리 겹친다.
+    """
+    tmp = path.with_suffix(".trim.mp3")
+    silence = ("silenceremove=start_periods=1:start_silence=0.05:"
+               "start_threshold=-45dB:detection=peak")
+    subprocess.run(
+        ["ffmpeg", "-v", "error", "-y", "-i", str(path),
+         "-af", f"{silence},areverse,{silence},areverse", str(tmp)],
+        check=True, capture_output=True,
+    )
+    tmp.replace(path)
+    return path
+
+
 def synthesize(text: str, output_path: Path, instructions: str, voice: str = "sage") -> Path:
     """대사 한 줄을 음성 파일로 만든다."""
     client = OpenAI(api_key=config.OPENAI_API_KEY)
@@ -65,8 +85,8 @@ def synthesize(text: str, output_path: Path, instructions: str, voice: str = "sa
                 response_format="mp3",
             )
             output_path.parent.mkdir(parents=True, exist_ok=True)
-            response.stream_to_file(str(output_path))
-            return output_path
+            output_path.write_bytes(response.read())
+            return trim_silence(output_path)
         except Exception as exc:  # 외부 API는 어떤 예외든 재시도 대상
             last_error = str(exc)
             console.print(f"  [yellow]⚠ {attempt}회차 실패, 재시도: {exc}[/yellow]")

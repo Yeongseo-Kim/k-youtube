@@ -133,6 +133,40 @@ def prepare_cut(index: int, name: str, duration: float, subs: list[tuple]) -> Pa
     return output
 
 
+def mux_voice(video: Path, output: Path) -> None:
+    """컷별 보이스 파일을 각자의 시작 초에 얹어 하나의 오디오 트랙으로 합친다.
+
+    보이스는 컷 경계를 넘어가도 된다 — 오히려 사운드 브릿지가 되어
+    컷 전환을 이어준다. BGM/효과음은 이후 단계에서 추가한다.
+    """
+    from src.providers.openai_tts import LINES, OUT_DIR as VOICE_DIR
+
+    lines = [(start, VOICE_DIR / f"{name}.mp3")
+             for name, start, _ in LINES if (VOICE_DIR / f"{name}.mp3").exists()]
+    if not lines:
+        console.print("[yellow]⚠ 보이스 파일이 없어 무음으로 출력합니다.[/yellow]")
+        video.replace(output)
+        return
+
+    args = [FFMPEG, "-y", "-v", "error", "-i", str(video)]
+    for _, path in lines:
+        args += ["-i", str(path)]
+
+    # 각 대사를 시작 초만큼 지연시킨 뒤 하나로 섞는다.
+    # amix는 입력 수만큼 볼륨을 낮추므로 normalize=0으로 원음을 유지한다.
+    delays = "".join(
+        f"[{i + 1}:a]adelay={int(start * 1000)}|{int(start * 1000)}[a{i}];"
+        for i, (start, _) in enumerate(lines)
+    )
+    mix_in = "".join(f"[a{i}]" for i in range(len(lines)))
+    filters = f"{delays}{mix_in}amix=inputs={len(lines)}:normalize=0[out]"
+
+    run(args + ["-filter_complex", filters, "-map", "0:v", "-map", "[out]",
+                "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
+                "-shortest", str(output)])
+    console.print(f"  [green]✓[/green] 보이스 {len(lines)}줄 합성")
+
+
 def main() -> Path:
     console.print("\n[bold blue]━━ episode-001 조립 ━━[/bold blue]\n")
     WORK_DIR.mkdir(parents=True, exist_ok=True)
@@ -146,8 +180,11 @@ def main() -> Path:
         "".join(f"file '{p.resolve()}'\n" for p in segments), encoding="utf-8"
     )
 
+    silent = WORK_DIR / "silent.mp4"
     run([FFMPEG, "-y", "-v", "error", "-f", "concat", "-safe", "0",
-         "-i", str(concat_list), "-c", "copy", str(FINAL)])
+         "-i", str(concat_list), "-c", "copy", str(silent)])
+
+    mux_voice(silent, FINAL)
 
     total = sum(d for _, d, _ in CUTS)
     size_mb = FINAL.stat().st_size / 1e6
