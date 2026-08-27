@@ -35,16 +35,18 @@ FONT_SIZE = 40
 WRAP_CHARS = 15    # 720px 폭에서 40px 글자가 넘치지 않는 한 줄 길이
 Y_SUB = 880        # 하단 세이프존(20%) 위. 2줄까지 안전하게 들어간다
 
-# 컷 구성: (파일, 사용 길이)
+# 컷 구성: (파일, 사용 길이, 배속)
+# 자르면 동작 뒷부분이 날아가므로 액션 컷은 빨리감기로 줄인다.
+# 설명 컷은 대사와 입/동작이 어긋나므로 원속, 엔딩은 미소가 살아야 해 완만하게만.
 CUTS = [
-    ("cut1.mp4", 3.5),
-    ("cut2.mp4", 5.8),
-    ("C3_spray_tissue.mp4", 4.5),
-    ("edu1_why.mp4", 6.5),
-    ("edu2_bleach.mp4", 6.3),
-    ("edu3_pinch.mp4", 8.0),
-    ("C4_peel_result.mp4", 4.2),
-    ("B2_chestup_rise.mp4", 3.5),
+    ("cut1.mp4", 3.5, 1.15),
+    ("cut2.mp4", 5.75, 1.05),
+    ("C3_spray_tissue.mp4", 4.45, 1.80),
+    ("edu1_why.mp4", 6.04, 1.0),
+    ("edu2_bleach.mp4", 6.04, 1.0),
+    ("edu3_pinch.mp4", 8.04, 1.0),
+    ("C4_peel_result.mp4", 4.15, 1.45),
+    ("B2_chestup_rise.mp4", 4.03, 1.50),
 ]
 
 # 보이스: (파일명, 시작초). 의미 단위로 묶어 생성했다 —
@@ -53,10 +55,10 @@ VOICE = [
     ("G1", 0.3),
     ("G2", 3.8),
     ("G3", 9.6),
-    ("G4", 14.2),
-    ("G5", 20.8),
-    ("G6", 27.2),
-    ("G7", 35.2),
+    ("G4", 14.1),
+    ("G5", 20.7),
+    ("G6", 27.1),
+    ("G7", 34.3),
     ("G8", 39.2),
 ]
 
@@ -66,14 +68,14 @@ SUBTITLES = [
     ("이건 물때가 아니라 요석이라고 하는 거야", 3.8, 6.4),
     ("요석은 알칼리성이라 산으로 녹일 수 있어", 6.4, 9.1),
     ("구연산 뿌리고 휴지로 덮어놔", 9.6, 11.8),
-    ("소변 속 요소가 세균을 만나면 암모니아가 나오고", 14.2, 17.6),
-    ("물이 알칼리로 변하면서 미네랄이 굳어", 17.6, 20.4),
-    ("락스는 알칼리라서 알칼리인 요석을 못 녹여", 20.8, 23.9),
-    ("색깔만 하얘지고 더러운 게 남아있는 거야", 23.9, 26.8),
-    ("구연산이 굳은 미네랄을 집게처럼 붙잡아 녹여", 27.2, 30.4),
-    ("이걸 킬레이션이라고 해", 30.4, 32.1),
-    ("아예 녹여내니까 락스보다 훨씬 오래가", 32.1, 34.8),
-    ("기다렸다 벗기면 말끔히 지워져", 35.2, 37.6),
+    ("소변 속 요소가 세균을 만나면 암모니아가 나오고", 14.1, 17.5),
+    ("물이 알칼리로 변하면서 미네랄이 굳어", 17.5, 20.3),
+    ("락스는 알칼리라서 알칼리인 요석을 못 녹여", 20.7, 23.8),
+    ("색깔만 하얘지고 더러운 게 남아있는 거야", 23.8, 26.7),
+    ("구연산이 굳은 미네랄을 집게처럼 붙잡아 녹여", 27.1, 30.3),
+    ("이걸 킬레이션이라고 해", 30.3, 32.0),
+    ("아예 녹여내니까 락스보다 훨씬 오래가", 32.0, 34.7),
+    ("기다렸다 벗기면 말끔히 지워져", 34.3, 36.7),
     ("다 됐다. 깨끗하지?", 39.2, 40.7),
 ]
 
@@ -191,7 +193,8 @@ def make_timecard(source: Path, output: Path, duration: float) -> None:
          "-c:v", "libx264", "-pix_fmt", "yuv420p", str(output)])
 
 
-def prepare_cut(index: int, name: str, duration: float, cut_start: float) -> Path:
+def prepare_cut(index: int, name: str, duration: float, speed: float,
+                cut_start: float) -> Path:
     """컷 하나를 트림 + 자막 처리해 중간 파일로 저장한다.
 
     끝부분 트림이 중요하다 — AI 생성 영상은 마지막 몇 프레임에서 동작이
@@ -212,7 +215,11 @@ def prepare_cut(index: int, name: str, duration: float, cut_start: float) -> Pat
     for path, _, _ in images:
         args += ["-i", path]
 
-    chain = f"[0:v]scale={W}:{H},fps=30"
+    # setpts로 배속 — 자막은 배속 후 시간축 기준이라 그대로 얹으면 된다
+    chain = f"[0:v]scale={W}:{H}"
+    if speed != 1.0:
+        chain += f",setpts=PTS/{speed}"
+    chain += ",fps=30"
     if overlay:
         chain += f",{overlay}"
     chain += "[v0]"
@@ -224,7 +231,8 @@ def prepare_cut(index: int, name: str, duration: float, cut_start: float) -> Pat
                 "-c:v", "libx264", "-preset", "medium", "-crf", "20",
                 "-pix_fmt", "yuv420p", str(output)])
 
-    console.print(f"  [green]✓[/green] [{index}] {name} → {duration}초")
+    console.print(f"  [green]✓[/green] [{index}] {name} → {duration}초"
+                  + (f" [dim](x{speed})[/dim]" if speed != 1.0 else ""))
     return output
 
 
@@ -263,8 +271,8 @@ def main() -> Path:
     WORK_DIR.mkdir(parents=True, exist_ok=True)
 
     segments, cursor = [], 0.0
-    for i, (name, duration) in enumerate(CUTS):
-        segments.append(prepare_cut(i, name, duration, cursor))
+    for i, (name, duration, speed) in enumerate(CUTS):
+        segments.append(prepare_cut(i, name, duration, speed, cursor))
         cursor += duration
 
     concat_list = WORK_DIR / "concat.txt"
