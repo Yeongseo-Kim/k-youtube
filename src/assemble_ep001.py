@@ -102,7 +102,7 @@ BOARDS = {
 AUDIO_DIR = SRC_DIR / "audio"
 BGM = "bgm_B_light.mp3"
 BGM_GAIN = 0.16          # 보이스 대비 약 -16dB. 더킹이 추가로 눌러준다
-SFX_GAIN = 0.55
+SFX_GAIN = 0.34
 
 # (파일, 시작초) — 화면에서 그 동작이 실제로 일어나는 시점에 맞춘다
 SFX = [
@@ -113,7 +113,9 @@ SFX = [
     ("04_transition.mp3", 13.6),     # 욕실 → 칠판
     ("09_transition_back.mp3", 33.7),  # 칠판 → 욕실 복귀
     ("05_tissue_peel.mp3", 35.4),    # 휴지 떼기
-    ("08_sparkle.mp3", 37.8),        # 결과 → "청소 끝" 전환
+    ("10_brush.mp3", 36.4),          # 솔로 한 번 문지르기
+    ("08_sparkle.mp3", 38.9),        # 솔질이 끝나고 반짝 — 깨끗해진 결과
+
 ]
 
 
