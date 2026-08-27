@@ -10,6 +10,8 @@
 
 import json
 import argparse
+import shutil
+import subprocess
 import time
 from pathlib import Path
 from rich.console import Console
@@ -279,17 +281,31 @@ def translate_and_localize(youtube, video_id: str, metadata: dict):
     console.print(f"  [green]✓ 다국어 설정 완료: {', '.join(localizations.keys())}[/green]")
 
 
-def set_thumbnail(youtube, video_id: str, thumbnail_path: Path):
-    """썸네일 설정"""
-    if not thumbnail_path.exists():
-        console.print("  [yellow]⚠ 썸네일 파일 없음 — 스킵[/yellow]")
-        return
+def set_thumbnail(youtube, video_id: str, thumbnail_path: Path, video_path: Path = None):
+    """썸네일 설정
 
+    쇼츠는 지정하지 않으면 유튜브가 임의 프레임을 골라 쓴다. thumbnail_path가
+    없으면 영상 첫 프레임을 뽑아서 대신 지정한다 (시스템 ffmpeg 필요).
+    쇼츠 커스텀 썸네일은 계정 인증(전화번호) 필요 — 미인증이면 403이 난다.
+    """
+    if not thumbnail_path.exists():
+        if not (video_path and video_path.exists() and shutil.which("ffmpeg")):
+            console.print("  [yellow]⚠ 썸네일 파일 없음 — 스킵[/yellow]")
+            return
+        console.print("  [dim]썸네일 없음 — 첫 프레임 추출 중...[/dim]")
+        thumbnail_path = thumbnail_path.with_name("thumbnail_frame0.jpg")
+        subprocess.run(
+            ["ffmpeg", "-y", "-i", str(video_path), "-frames:v", "1",
+             "-vf", "scale=1080:1920", "-q:v", "2", str(thumbnail_path)],
+            check=True, capture_output=True,
+        )
+
+    mimetype = "image/jpeg" if thumbnail_path.suffix.lower() in (".jpg", ".jpeg") else "image/png"
     youtube.thumbnails().set(
         videoId=video_id,
-        media_body=MediaFileUpload(str(thumbnail_path), mimetype="image/png"),
+        media_body=MediaFileUpload(str(thumbnail_path), mimetype=mimetype),
     ).execute()
-    console.print(f"  [green]✓ 썸네일 설정 완료[/green]")
+    console.print(f"  [green]✓ 썸네일 설정 완료: {thumbnail_path.name}[/green]")
 
 
 def post_comment(youtube, video_id: str, text: str) -> str | None:
@@ -339,8 +355,11 @@ def run(output_dir: Path, video_path: Path, thumbnail_path: Path, metadata_path:
             if attempt == 3:
                 raise
 
-    # 3. 썸네일 설정
-    set_thumbnail(youtube, video_id, thumbnail_path)
+    # 3. 썸네일 설정 (실패해도 업로드는 유지)
+    try:
+        set_thumbnail(youtube, video_id, thumbnail_path, video_path)
+    except Exception as e:
+        console.print(f"  [yellow]⚠ 썸네일 설정 실패: {e}[/yellow]")
 
     # 4. 다국어 제목/설명 설정
     try:
