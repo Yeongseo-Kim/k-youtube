@@ -33,6 +33,9 @@ except ImportError:
 SCOPES = [
     "https://www.googleapis.com/auth/youtube.upload",
     "https://www.googleapis.com/auth/youtube",
+    # commentThreads.insert는 force-ssl을 요구한다. 이 줄을 추가한 뒤에는
+    # 기존 토큰이 무효라 `python3 -m src.uploader --auth-only`로 재인증해야 한다.
+    "https://www.googleapis.com/auth/youtube.force-ssl",
 ]
 TOKEN_PATH = Path("credentials/youtube_token.json")
 
@@ -112,8 +115,9 @@ def upload_video(
             "title": metadata.get("title", "K-Content Update")[:100],
             "description": metadata.get("description", "#Shorts"),
             "tags": _trim_tags(metadata.get("tags", "")),
-            "categoryId": "24",  # Entertainment
-            "defaultLanguage": "en",
+            # 24=Entertainment, 26=Howto & Style. 살림 콘텐츠는 26이 맞다.
+            "categoryId": metadata.get("categoryId", "24"),
+            "defaultLanguage": metadata.get("defaultLanguage", "en"),
         },
         "status": {
             "privacyStatus": privacy,
@@ -288,6 +292,30 @@ def set_thumbnail(youtube, video_id: str, thumbnail_path: Path):
     console.print(f"  [green]✓ 썸네일 설정 완료[/green]")
 
 
+def post_comment(youtube, video_id: str, text: str) -> str | None:
+    """영상에 최상위 댓글을 단다.
+
+    고정(pin)은 API에 엔드포인트가 없다. commentThreads.insert / comments.update /
+    setModerationStatus / delete가 전부고 pin·featured는 목록에 없어서,
+    작성까지만 자동으로 하고 고정은 스튜디오에서 한 번 눌러야 한다.
+    """
+    if not text:
+        return None
+
+    response = youtube.commentThreads().insert(
+        part="snippet",
+        body={"snippet": {
+            "videoId": video_id,
+            "topLevelComment": {"snippet": {"textOriginal": text}},
+        }},
+    ).execute()
+
+    comment_id = response["id"]
+    console.print(f"  [green]✓ 댓글 작성 완료[/green] [dim]{comment_id}[/dim]")
+    console.print("  [yellow]→ 고정은 API로 안 됩니다. 스튜디오에서 ⋮ → '고정' 클릭[/yellow]")
+    return comment_id
+
+
 def run(output_dir: Path, video_path: Path, thumbnail_path: Path, metadata_path: Path) -> str:
     """업로드 모듈 실행"""
     console.print("\n[bold blue]━━ [6/6] 유튜브 업로드 시작 ━━[/bold blue]")
@@ -320,11 +348,19 @@ def run(output_dir: Path, video_path: Path, thumbnail_path: Path, metadata_path:
     except Exception as e:
         console.print(f"  [yellow]⚠ 다국어 설정 실패: {e}[/yellow]")
 
-    # 5. 결과 저장
+    # 5. 고정 댓글 (작성만 자동, 고정은 수동)
+    comment_id = None
+    try:
+        comment_id = post_comment(youtube, video_id, metadata.get("pinned_comment", ""))
+    except Exception as e:
+        console.print(f"  [yellow]⚠ 댓글 작성 실패: {e}[/yellow]")
+
+    # 6. 결과 저장
     result = {
         "video_id": video_id,
         "url": f"https://www.youtube.com/shorts/{video_id}",
         "privacy": config.UPLOAD_PRIVACY,
+        "comment_id": comment_id,
     }
     (output_dir / "upload_result.json").write_text(
         json.dumps(result, indent=2), encoding="utf-8"
