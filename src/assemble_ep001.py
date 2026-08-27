@@ -37,44 +37,44 @@ Y_SUB = 880        # 하단 세이프존(20%) 위. 2줄까지 안전하게 들�
 
 # 컷 구성: (파일, 사용 길이)
 CUTS = [
-    ("cut1.mp4", 3.8),
-    ("cut2.mp4", 6.0),
-    ("C3_spray_tissue.mp4", 6.0),
-    ("edu1_why.mp4", 6.0),
-    ("edu2_bleach.mp4", 6.0),
+    ("cut1.mp4", 3.5),
+    ("cut2.mp4", 5.8),
+    ("C3_spray_tissue.mp4", 4.5),
+    ("edu1_why.mp4", 6.5),
+    ("edu2_bleach.mp4", 6.3),
     ("edu3_pinch.mp4", 8.0),
-    ("C4_peel_result.mp4", 5.5),
-    ("B2_chestup_rise.mp4", 5.5),
+    ("C4_peel_result.mp4", 4.2),
+    ("B2_chestup_rise.mp4", 3.5),
 ]
 
 # 보이스: (파일명, 시작초). 의미 단위로 묶어 생성했다 —
 # 문장을 쪼개면 낭독조가 되어 리듬이 끊긴다.
 VOICE = [
-    ("G1", 0.4),
-    ("G2", 4.3),
-    ("G3", 10.3),
-    ("G4", 16.2),
-    ("G5", 22.8),
-    ("G6", 29.2),
-    ("G7", 37.2),
-    ("G8", 42.0),
+    ("G1", 0.3),
+    ("G2", 3.8),
+    ("G3", 9.6),
+    ("G4", 14.2),
+    ("G5", 20.8),
+    ("G6", 27.2),
+    ("G7", 35.2),
+    ("G8", 39.2),
 ]
 
 # 자막: (텍스트, 시작초, 끝초) — 영상 전체 기준 절대 시각. 대사와 동일한 문장.
 SUBTITLES = [
-    ("변기에 묻은 이거 안 생기게 하는 법 알려줄게", 0.4, 3.3),
-    ("이건 물때가 아니라 요석이라고 하는 거야", 4.3, 7.0),
-    ("요석은 알칼리성이라 산으로 녹일 수 있어", 7.0, 9.6),
-    ("구연산 뿌리고 휴지로 덮어놔", 10.3, 12.5),
-    ("소변 속 요소가 세균을 만나면 암모니아가 나오고", 16.2, 19.3),
-    ("물이 알칼리로 변하면서 미네랄이 굳어", 19.3, 22.4),
-    ("락스는 알칼리라서 알칼리인 요석을 못 녹여", 22.8, 25.8),
-    ("색깔만 하얘지고 더러운 게 남아있는 거야", 25.8, 28.8),
-    ("구연산이 굳은 미네랄을 집게처럼 붙잡아 녹여", 29.2, 32.5),
-    ("이걸 킬레이션이라고 해", 32.5, 34.4),
-    ("아예 녹여내니까 락스보다 훨씬 오래가", 34.4, 36.8),
-    ("기다렸다 벗기면 말끔히 지워져", 37.2, 39.6),
-    ("다 됐다. 깨끗하지?", 42.0, 43.5),
+    ("변기에 묻은 이거 안 생기게 하는 법 알려줄게", 0.3, 3.2),
+    ("이건 물때가 아니라 요석이라고 하는 거야", 3.8, 6.4),
+    ("요석은 알칼리성이라 산으로 녹일 수 있어", 6.4, 9.1),
+    ("구연산 뿌리고 휴지로 덮어놔", 9.6, 11.8),
+    ("소변 속 요소가 세균을 만나면 암모니아가 나오고", 14.2, 17.6),
+    ("물이 알칼리로 변하면서 미네랄이 굳어", 17.6, 20.4),
+    ("락스는 알칼리라서 알칼리인 요석을 못 녹여", 20.8, 23.9),
+    ("색깔만 하얘지고 더러운 게 남아있는 거야", 23.9, 26.8),
+    ("구연산이 굳은 미네랄을 집게처럼 붙잡아 녹여", 27.2, 30.4),
+    ("이걸 킬레이션이라고 해", 30.4, 32.1),
+    ("아예 녹여내니까 락스보다 훨씬 오래가", 32.1, 34.8),
+    ("기다렸다 벗기면 말끔히 지워져", 35.2, 37.6),
+    ("다 됐다. 깨끗하지?", 39.2, 40.7),
 ]
 
 # 칠판 판서 — 컷 파일명 → (텍스트, x식, y, 크기, 색). 분필처럼 박스 없이 흰 글씨로 얹는다.
@@ -93,6 +93,12 @@ BOARDS = {
     "edu3_pinch.mp4": [
         ("chelate ← chele\n그리스어로 '게 집게'", "40", 225, 34, "white@0.92"),
     ],
+}
+
+# 컷별 이미지 오버레이 — 컬러 이모지는 drawtext(freetype)에서 색이 빠지므로
+# PNG로 렌더해 overlay 필터로 합성한다.
+IMAGE_OVERLAYS = {
+    "edu3_pinch.mp4": [("assets/serin/crab.png", 416, 262)],
 }
 
 # 시간 경과 카드 — 결과가 즉효처럼 보이면 조작 의심을 사므로 시간을 명시한다
@@ -201,20 +207,28 @@ def prepare_cut(index: int, name: str, duration: float, cut_start: float) -> Pat
         layers.append(subs)
     overlay = ",".join(layers)
 
-    vf = f"scale={W}:{H},fps=30"
-    if overlay:
-        vf = f"{vf},{overlay}"
+    images = IMAGE_OVERLAYS.get(name, [])
+    args = [FFMPEG, "-y", "-v", "error", "-i", str(source)]
+    for path, _, _ in images:
+        args += ["-i", path]
 
-    run([FFMPEG, "-y", "-v", "error", "-i", str(source), "-t", str(duration),
-         "-vf", vf, "-an",
-         "-c:v", "libx264", "-preset", "medium", "-crf", "20",
-         "-pix_fmt", "yuv420p", str(output)])
+    chain = f"[0:v]scale={W}:{H},fps=30"
+    if overlay:
+        chain += f",{overlay}"
+    chain += "[v0]"
+    for i, (_, ix, iy) in enumerate(images):
+        chain += f";[v{i}][{i + 1}:v]overlay={ix}:{iy}[v{i + 1}]"
+    label = f"[v{len(images)}]"
+
+    run(args + ["-t", str(duration), "-filter_complex", chain, "-map", label, "-an",
+                "-c:v", "libx264", "-preset", "medium", "-crf", "20",
+                "-pix_fmt", "yuv420p", str(output)])
 
     console.print(f"  [green]✓[/green] [{index}] {name} → {duration}초")
     return output
 
 
-def mux_voice(video: Path, output: Path) -> None:
+def mux_voice(video: Path, output: Path, total: float) -> None:
     """보이스를 각자의 시작 초에 얹어 하나의 오디오 트랙으로 합친다.
 
     보이스가 컷 경계를 넘어가도 된다 — 오히려 사운드 브릿지가 되어 전환을 이어준다.
@@ -236,11 +250,11 @@ def mux_voice(video: Path, output: Path) -> None:
         for i, (start, _) in enumerate(lines)
     )
     mix_in = "".join(f"[a{i}]" for i in range(len(lines)))
-    filters = f"{delays}{mix_in}amix=inputs={len(lines)}:normalize=0[out]"
+    filters = f"{delays}{mix_in}amix=inputs={len(lines)}:normalize=0,apad[out]"
 
     run(args + ["-filter_complex", filters, "-map", "0:v", "-map", "[out]",
                 "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
-                "-shortest", str(output)])
+                "-t", str(total), str(output)])
     console.print(f"  [green]✓[/green] 보이스 {len(lines)}개 합성")
 
 
@@ -262,7 +276,7 @@ def main() -> Path:
     run([FFMPEG, "-y", "-v", "error", "-f", "concat", "-safe", "0",
          "-i", str(concat_list), "-c", "copy", str(silent)])
 
-    mux_voice(silent, FINAL)
+    mux_voice(silent, FINAL, cursor)
 
     size_mb = FINAL.stat().st_size / 1e6
     console.print(
