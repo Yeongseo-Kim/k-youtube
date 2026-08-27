@@ -36,20 +36,13 @@ pip install -r requirements.txt --quiet
 
 echo "✓ 패키지 설치 완료"
 
-# yt-dlp 최신 버전 확인
-echo ""
-echo "→ yt-dlp 최신 버전 확인..."
-pip install -U yt-dlp --quiet
-yt_dlp_version=$(yt-dlp --version 2>&1)
-echo "✓ yt-dlp: $yt_dlp_version"
-
-# ffmpeg 확인 (moviepy 필수 의존성)
+# ffmpeg 확인 (조립 단계 필수 — drawtext 지원되는 시스템 ffmpeg 필요)
 echo ""
 if command -v ffmpeg &> /dev/null; then
     ffmpeg_version=$(ffmpeg -version 2>&1 | head -n 1)
     echo "✓ ffmpeg: 설치됨"
 else
-    echo "⚠ ffmpeg가 설치되지 않았습니다. moviepy 영상 편집에 필요합니다."
+    echo "⚠ ffmpeg가 설치되지 않았습니다. 영상 조립(src/assemble_ep001.py)에 필요합니다."
     echo ""
     echo "  macOS:   brew install ffmpeg"
     echo "  Ubuntu:  sudo apt install ffmpeg"
@@ -67,13 +60,14 @@ if [ ! -f ".env" ]; then
     echo " ⚠ 다음 작업이 필요합니다:"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo " 1. .env 파일을 열고 API 키를 입력하세요:"
-    echo "    - OPENAI_API_KEY"
-    echo "    - GEMINI_API_KEY"
+    echo "    - MODELARK_API_KEY   (영상 컷 생성)"
+    echo "    - ELEVENLABS_API_KEY (보이스·효과음·BGM)"
+    echo "    - OPENAI_API_KEY / GEMINI_API_KEY (TTS 오디션용, 선택)"
     echo ""
-    echo " 2. YouTube OAuth 설정 (기획서 5장 참고):"
+    echo " 2. YouTube OAuth 설정:"
     echo "    - Google Cloud Console에서 OAuth JSON 다운로드"
     echo "    - credentials/youtube_oauth.json 에 저장"
-    echo "    - python src/uploader.py --auth-only 실행"
+    echo "    - python3 -m src.uploader --auth-only 실행"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 else
     echo "✓ .env 파일이 이미 존재합니다."
@@ -91,10 +85,9 @@ echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo " 설정 완료!"
 echo ""
-echo " 테스트 실행:"
-echo "   python main.py --dry-run"
+echo " 업로드 실행:"
+echo "   python3 -m src.uploader"
 echo ""
-echo " 전체 실행:"
-echo "   python main.py"
+echo " 제작 흐름은 .agent/workflows/run_pipeline.md 참고"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""

@@ -1,44 +1,33 @@
 """
-K-Content YouTube Shorts Automation - 설정 관리
-로컬: .env 파일에서 로드
-Streamlit Cloud: st.secrets에서 로드 (fallback)
+세린 파이프라인 — 설정
+모든 설정값은 이 파일에서만 관리 (하드코딩 금지)
 """
 
 import os
 from pathlib import Path
 from dotenv import load_dotenv
 
-# .env 로드 (로컬 개발용)
+# .env 로드
 load_dotenv()
 
 
 def _get(key: str, default: str = "") -> str:
-    """로컬 .env 또는 Streamlit Cloud secrets에서 값 읽기"""
-    val = os.getenv(key, "")
-    if val:
-        return val
-    try:
-        import streamlit as st
-        return st.secrets.get(key, default)
-    except Exception:
-        return default
+    """환경변수(.env 포함)에서 값 읽기"""
+    return os.getenv(key, default)
 
 # ── 경로 설정 ──
 BASE_DIR = Path(__file__).parent
 OUTPUT_DIR = BASE_DIR / os.getenv("OUTPUT_DIR", "output")
-CREDENTIALS_DIR = BASE_DIR / "credentials"
 
-# ── OpenAI ──
+# ── OpenAI (TTS 오디션) ──
 OPENAI_API_KEY = _get("OPENAI_API_KEY")
-LLM_MODEL = "gpt-4o"
 TTS_MODEL = _get("TTS_MODEL") or "tts-1-hd"
-TTS_VOICE = _get("TTS_VOICE") or "coral"
-TTS_SPEED = float(_get("TTS_SPEED") or "1.25")
-WHISPER_MODEL = "whisper-1"
 
-# ── Gemini ──
+# ── Gemini (TTS 오디션) ──
 GEMINI_API_KEY = _get("GEMINI_API_KEY")
-GEMINI_IMAGE_MODEL = _get("GEMINI_IMAGE_MODEL") or "gemini-2.5-flash-image"
+
+# ── ElevenLabs (보이스 · 효과음 · BGM) ──
+ELEVENLABS_API_KEY = _get("ELEVENLABS_API_KEY")
 
 # ── BytePlus ModelArk (Seedance 영상 생성) ──
 MODELARK_API_KEY = _get("MODELARK_API_KEY")
@@ -56,56 +45,16 @@ YOUTUBE_OAUTH_CLIENT_ID = _get("YOUTUBE_OAUTH_CLIENT_ID")
 YOUTUBE_OAUTH_CLIENT_SECRET = _get("YOUTUBE_OAUTH_CLIENT_SECRET")
 UPLOAD_PRIVACY = os.getenv("UPLOAD_PRIVACY", "private")
 
-# ── 파이프라인 설정 ──
-DRY_RUN = os.getenv("DRY_RUN", "false").lower() == "true"
-MAX_DAILY_VIDEOS = int(os.getenv("MAX_DAILY_VIDEOS", "2"))
-
-# ── 콘텐츠 설정 ──
-SCRIPT_WORD_COUNT = (70, 110)  # 25~30초 분량 영문 내레이션 (쇼츠 최적화)
-VIDEO_RESOLUTION = (1080, 1920)  # 9:16 세로 (width, height)
-VIDEO_FPS = 30
-VIDEO_MAX_DURATION = 60  # 초
-THUMBNAIL_SIZE = (1080, 1920)  # 9:16 세로 (YouTube Shorts)
-
-# ── RSS 피드 소스 ──
-RSS_FEEDS = [
-    "https://www.soompi.com/feed",
-    "https://www.allkpop.com/feed",
-    "https://www.koreaboo.com/feed/",
-]
-
-# ── yt-dlp 설정 ──
-YTDLP_MAX_RESULTS = 5       # 검색 시 최대 결과 수
-YTDLP_CLIP_DURATION = 8     # 클립 추출 길이 (초)
-YTDLP_FORMAT = "bestvideo[height<=1080]+bestaudio/best[height<=1080]"
-ASSET_VIDEO_TARGET = 10     # 영상 에셋 목표 개수
-ASSET_IMAGE_TARGET = 10     # 이미지 에셋 목표 개수
-# YouTube 봇 차단 우회: cookies.txt (Netscape 형식). Streamlit secrets에 YT_COOKIES로 내용 저장 가능
-YT_COOKIES_PATH = _get("YT_COOKIES_PATH", "")  # credentials/yt_cookies.txt
-YT_COOKIES = _get("YT_COOKIES", "")            # secrets에 cookies 전체 내용
-
-# ── 영상 편집 설정 ──
-CROSSFADE_DURATION = 0.4     # 씬 전환 페이드 (초)
-KEN_BURNS_ZOOM = 1.15        # 줌인 배율
-SUBTITLE_FONT_SIZE = 40
-SUBTITLE_FONT_COLOR = "white"
-# YouTube 권장: 1080p 30fps → 8Mbps, 60fps → 12Mbps (표준화질 처리 최소화)
-VIDEO_BITRATE = "8M"
-AUDIO_BITRATE = "384k"  # YouTube 권장 스테레오
-
 
 def validate():
     """필수 설정값 검증"""
     errors = []
-    if not OPENAI_API_KEY:
-        errors.append("OPENAI_API_KEY가 설정되지 않았습니다.")
-    if not GEMINI_API_KEY:
-        errors.append("GEMINI_API_KEY가 설정되지 않았습니다.")
-    if not Path(YOUTUBE_CLIENT_SECRET).exists() and not DRY_RUN:
-        errors.append(
-            f"YouTube OAuth JSON을 찾을 수 없습니다: {YOUTUBE_CLIENT_SECRET}\n"
-            "  → 기획서 5장 'YouTube API 설정 가이드' 참고"
-        )
+    if not MODELARK_API_KEY:
+        errors.append("MODELARK_API_KEY가 설정되지 않았습니다. (영상 컷 생성)")
+    if not ELEVENLABS_API_KEY:
+        errors.append("ELEVENLABS_API_KEY가 설정되지 않았습니다. (보이스·효과음·BGM)")
+    if not Path(YOUTUBE_CLIENT_SECRET).exists() and not YOUTUBE_REFRESH_TOKEN:
+        errors.append(f"YouTube OAuth JSON을 찾을 수 없습니다: {YOUTUBE_CLIENT_SECRET}")
     return errors
 
 
@@ -123,14 +72,14 @@ if __name__ == "__main__":
     from rich.console import Console
     console = Console()
 
-    console.print("\n[bold]K-Content Shorts — 설정 검증[/bold]\n")
-    console.print(f"  OpenAI API Key: {'✓ 설정됨' if OPENAI_API_KEY else '✗ 미설정'}")
-    console.print(f"  Gemini API Key: {'✓ 설정됨' if GEMINI_API_KEY else '✗ 미설정'}")
-    console.print(f"  YouTube OAuth:  {'✓ 파일 존재' if Path(YOUTUBE_CLIENT_SECRET).exists() else '✗ 파일 없음'}")
-    console.print(f"  TTS Voice:      {TTS_VOICE}")
-    console.print(f"  Upload Privacy: {UPLOAD_PRIVACY}")
-    console.print(f"  Dry Run:        {DRY_RUN}")
-    console.print(f"  Output Dir:     {OUTPUT_DIR}")
+    console.print("\n[bold]세린 파이프라인 — 설정 검증[/bold]\n")
+    console.print(f"  ModelArk Key:    {'✓ 설정됨' if MODELARK_API_KEY else '✗ 미설정'}")
+    console.print(f"  ElevenLabs Key:  {'✓ 설정됨' if ELEVENLABS_API_KEY else '✗ 미설정'}")
+    console.print(f"  OpenAI Key:      {'✓ 설정됨' if OPENAI_API_KEY else '✗ 미설정 (오디션용)'}")
+    console.print(f"  Gemini Key:      {'✓ 설정됨' if GEMINI_API_KEY else '✗ 미설정 (오디션용)'}")
+    console.print(f"  YouTube OAuth:   {'✓ 파일 존재' if Path(YOUTUBE_CLIENT_SECRET).exists() else '✗ 파일 없음'}")
+    console.print(f"  Upload Privacy:  {UPLOAD_PRIVACY}")
+    console.print(f"  Output Dir:      {OUTPUT_DIR}")
 
     errors = validate()
     if errors:
@@ -139,6 +88,3 @@ if __name__ == "__main__":
             console.print(f"  [red]• {e}[/red]")
     else:
         console.print("\n[bold green]✓ 모든 설정이 정상입니다.[/bold green]")
-
-# ── ElevenLabs (TTS) ──
-ELEVENLABS_API_KEY = _get("ELEVENLABS_API_KEY")

@@ -44,7 +44,6 @@
 
 ## 8. 테스트 & 검증
 - 새 기능은 `python src/<모듈>.py` 단독 실행으로 검증 가능하도록 `if __name__ == "__main__":` 블록 포함
-- 전체 파이프라인 테스트는 `python main.py --dry-run` 사용
 - 업로드 테스트 시 `UPLOAD_PRIVACY=private` 유지
 
 ## 9. 로깅 규칙
@@ -54,8 +53,3 @@
   - 오류: `[red]✗ ...[/red]`
   - 진행: `[dim]... [/dim]`
 - 단계 시작 시: `[bold blue]━━ [N/6] 단계명 시작 ━━[/bold blue]`
-
-## 10. Gemini 모델 사용 규칙
-- 모델명은 `config.py`에 상수로 선언 후 사용
-- 이미지 생성: `gemini-2.0-flash-exp-image-generation`
-- 텍스트: 별도 지정 없으면 OpenAI GPT-4o 우선 사용
