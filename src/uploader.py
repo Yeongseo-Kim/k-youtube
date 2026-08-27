@@ -372,12 +372,20 @@ def run(output_dir: Path, video_path: Path, thumbnail_path: Path, metadata_path:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--auth-only", action="store_true", help="OAuth 토큰 취득만 실행")
+    parser.add_argument("--comment", metavar="VIDEO_ID",
+                        help="오늘 metadata.json의 pinned_comment를 해당 영상에 작성만 실행 "
+                             "(비공개 영상은 댓글이 막혀 있어 공개 전환 후 사용)")
     args = parser.parse_args()
 
     if args.auth_only:
         console.print("[bold]YouTube OAuth 인증 시작...[/bold]")
         get_authenticated_service()
-        console.print("[bold green]✓ 인증 완료. 이제 main.py를 실행하세요.[/bold green]")
+        console.print("[bold green]✓ 인증 완료.[/bold green]")
+    elif args.comment:
+        metadata_path = config.get_today_output_dir() / "metadata.json"
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        youtube = get_authenticated_service()
+        post_comment(youtube, args.comment, metadata.get("pinned_comment", ""))
     else:
         output_dir = config.get_today_output_dir()
         run(
