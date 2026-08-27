@@ -77,6 +77,24 @@ SUBTITLES = [
     ("다 됐다. 깨끗하지?", 42.0, 43.5),
 ]
 
+# 칠판 판서 — 컷 파일명 → (텍스트, x식, y, 크기, 색). 분필처럼 박스 없이 흰 글씨로 얹는다.
+# 빈 칠판은 어색하고, AI에게 직접 쓰게 하면 한글이 깨져서 오버레이로 처리한다.
+# 아래첨자(₂ ³ ⁺)는 Noto Sans CJK에 글리프가 없어 두부로 깨지므로 일반 숫자를 쓴다.
+BOARDS = {
+    "edu1_why.mp4": [
+        ("CO(NH2)2  →  NH3\n요소            암모니아\n\npH ↑  →  미네랄 결정",
+         "(w-text_w)/2", 240, 36, "white@0.92"),
+    ],
+    "edu2_bleach.mp4": [
+        ("NaOCl  (알칼리)", "(w-text_w)/2", 210, 38, "white@0.92"),
+        ("X", "(w-text_w)/2", 268, 56, "red@0.9"),
+        ("CaCO3  (알칼리)", "(w-text_w)/2", 336, 38, "white@0.92"),
+    ],
+    "edu3_pinch.mp4": [
+        ("chelate ← chele\n그리스어로 '게 집게'", "40", 225, 34, "white@0.92"),
+    ],
+}
+
 # 시간 경과 카드 — 결과가 즉효처럼 보이면 조작 의심을 사므로 시간을 명시한다
 TIMECARD_TEXT = "20분 뒤"
 
@@ -126,6 +144,22 @@ def drawtext(text: str, start: float, end: float, size: int = FONT_SIZE,
     )
 
 
+
+def chalk(text: str, x: str, y: int, size: int, color: str,
+          start: float, end: float) -> str:
+    """칠판 판서용 오버레이. 박스 없이 흰 글씨 + 옅은 그림자로 분필처럼 보이게 한다."""
+    global _text_file_seq
+    _text_file_seq += 1
+    path = WORK_DIR / f"board_{_text_file_seq:03d}.txt"
+    path.write_text(text, encoding="utf-8")
+    return (
+        f"drawtext=fontfile={FONT_BOLD}:textfile={path}:fontsize={size}:"
+        f"fontcolor={color}:x={x}:y={y}:line_spacing=16:"
+        f"shadowcolor=black@0.35:shadowx=2:shadowy=2:"
+        f"enable='between(t,{start},{end})'"
+    )
+
+
 def subs_for_cut(cut_start: float, cut_end: float) -> str:
     """이 컷 구간에 걸치는 자막을 골라 컷 기준 상대 시각으로 변환한다.
 
@@ -160,7 +194,12 @@ def prepare_cut(index: int, name: str, duration: float, cut_start: float) -> Pat
     output = WORK_DIR / f"{index:02d}_{Path(name).stem}.mp4"
 
     source = SRC_DIR / name
-    overlay = subs_for_cut(cut_start, cut_start + duration)
+    layers = [chalk(t, x, y, size, color, 0.3, duration)
+              for t, x, y, size, color in BOARDS.get(name, [])]
+    subs = subs_for_cut(cut_start, cut_start + duration)
+    if subs:
+        layers.append(subs)
+    overlay = ",".join(layers)
 
     vf = f"scale={W}:{H},fps=30"
     if overlay:
