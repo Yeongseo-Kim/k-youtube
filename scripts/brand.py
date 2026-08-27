@@ -99,7 +99,7 @@ def banner(lines, tagline, out, serif=True):
 
 
 if __name__ == "__main__":
-    TAG = "살림 못 하는 집에 요정이 하나씩 붙습니다"
+    TAG = "살림에 서툰 집엔 요정이 하나씩 붙습니다"
     print(profile())
     print(banner(["우리집엔", "요정이 산다"], TAG, "assets/channel/banner_A.png", serif=True))
     print(banner(["어서 와,", "우리집"], TAG, "assets/channel/banner_B.png", serif=False))
