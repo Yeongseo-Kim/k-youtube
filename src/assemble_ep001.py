@@ -98,6 +98,25 @@ BOARDS = {
     ],
 }
 
+# ── 사운드 ──────────────────────────────────────────────
+AUDIO_DIR = SRC_DIR / "audio"
+BGM = "bgm_B_light.mp3"
+BGM_GAIN = 0.16          # 보이스 대비 약 -16dB. 더킹이 추가로 눌러준다
+SFX_GAIN = 0.55
+
+# (파일, 시작초) — 화면에서 그 동작이 실제로 일어나는 시점에 맞춘다
+SFX = [
+    ("01_lid.mp3", 0.25),            # 훅 시작, 뚜껑 탁
+    ("06_flush.mp3", 4.6),           # CUT2에서 실제로 물을 내린다
+    ("02_spray.mp3", 9.7),           # 구연산 분사
+    ("03_tissue_lay.mp3", 11.2),     # 휴지 덮기
+    ("04_transition.mp3", 13.6),     # 욕실 → 칠판
+    ("09_transition_back.mp3", 33.7),  # 칠판 → 욕실 복귀
+    ("05_tissue_peel.mp3", 35.4),    # 휴지 떼기
+    ("08_sparkle.mp3", 37.8),        # 결과 → "청소 끝" 전환
+]
+
+
 # 컷별 이미지 오버레이 — 컬러 이모지는 drawtext(freetype)에서 색이 빠지므로
 # PNG로 렌더해 overlay 필터로 합성한다.
 IMAGE_OVERLAYS = {
@@ -237,34 +256,70 @@ def prepare_cut(index: int, name: str, duration: float, speed: float,
     return output
 
 
-def mux_voice(video: Path, output: Path, total: float) -> None:
-    """보이스를 각자의 시작 초에 얹어 하나의 오디오 트랙으로 합친다.
+def mux_audio(video: Path, output: Path, total: float) -> None:
+    """보이스 + BGM + 효과음을 한 트랙으로 합친다.
 
-    보이스가 컷 경계를 넘어가도 된다 — 오히려 사운드 브릿지가 되어 전환을 이어준다.
+    BGM은 sidechaincompress로 보이스에 물려 더킹한다 — 대사가 나올 때만
+    자동으로 눌리므로, 여백에서는 살아 있고 설명 구간에서는 방해하지 않는다.
     """
-    lines = [(start, VOICE_DIR / f"{name}.mp3")
-             for name, start in VOICE if (VOICE_DIR / f"{name}.mp3").exists()]
-    if not lines:
+    voices = [(start, VOICE_DIR / f"{name}.mp3")
+              for name, start in VOICE if (VOICE_DIR / f"{name}.mp3").exists()]
+    if not voices:
         console.print("[yellow]⚠ 보이스 파일이 없어 무음으로 출력합니다.[/yellow]")
         video.replace(output)
         return
 
     args = [FFMPEG, "-y", "-v", "error", "-i", str(video)]
-    for _, path in lines:
+    parts, idx = [], 1
+
+    # 1) 보이스 — 각자의 시작 초에 배치해 하나로 합친다
+    labels = []
+    for start, path in voices:
         args += ["-i", str(path)]
+        delay = int(start * 1000)
+        parts.append(f"[{idx}:a]adelay={delay}|{delay},aformat=sample_rates=44100:"
+                     f"channel_layouts=stereo[v{idx}]")
+        labels.append(f"[v{idx}]")
+        idx += 1
+    parts.append(f"{''.join(labels)}amix=inputs={len(labels)}:normalize=0[voice]")
 
-    # amix는 입력 수만큼 볼륨을 낮추므로 normalize=0으로 원음을 유지한다.
-    delays = "".join(
-        f"[{i + 1}:a]adelay={int(start * 1000)}|{int(start * 1000)}[a{i}];"
-        for i, (start, _) in enumerate(lines)
-    )
-    mix_in = "".join(f"[a{i}]" for i in range(len(lines)))
-    filters = f"{delays}{mix_in}amix=inputs={len(lines)}:normalize=0,apad[out]"
+    # 2) 효과음 — 화면 동작에 맞춘 시점에 배치
+    sfx_labels = []
+    for name, start in SFX:
+        path = AUDIO_DIR / name
+        if not path.exists():
+            continue
+        args += ["-i", str(path)]
+        delay = int(start * 1000)
+        parts.append(f"[{idx}:a]adelay={delay}|{delay},volume={SFX_GAIN},"
+                     f"aformat=sample_rates=44100:channel_layouts=stereo[s{idx}]")
+        sfx_labels.append(f"[s{idx}]")
+        idx += 1
 
-    run(args + ["-filter_complex", filters, "-map", "0:v", "-map", "[out]",
+    # 3) BGM — 더킹 후 페이드아웃
+    bgm_path = AUDIO_DIR / BGM
+    if bgm_path.exists():
+        args += ["-i", str(bgm_path)]
+        parts.append(
+            f"[{idx}:a]volume={BGM_GAIN},afade=t=out:st={total - 2.5}:d=2.5,"
+            f"aformat=sample_rates=44100:channel_layouts=stereo[bgmraw]"
+        )
+        parts.append("[voice]asplit=2[voice_out][voice_sc]")
+        parts.append("[bgmraw][voice_sc]sidechaincompress="
+                     "threshold=0.03:ratio=12:attack=15:release=350[bgm]")
+        mix_in = "[voice_out][bgm]" + "".join(sfx_labels)
+        count = 2 + len(sfx_labels)
+    else:
+        mix_in = "[voice]" + "".join(sfx_labels)
+        count = 1 + len(sfx_labels)
+
+    parts.append(f"{mix_in}amix=inputs={count}:normalize=0,alimiter=limit=0.95,apad[out]")
+
+    run(args + ["-filter_complex", ";".join(parts), "-map", "0:v", "-map", "[out]",
                 "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
                 "-t", str(total), str(output)])
-    console.print(f"  [green]✓[/green] 보이스 {len(lines)}개 합성")
+    console.print(f"  [green]✓[/green] 보이스 {len(voices)} · 효과음 {len(sfx_labels)} · "
+                  f"BGM {'있음' if bgm_path.exists() else '없음'}")
 
 
 def main() -> Path:
@@ -285,7 +340,7 @@ def main() -> Path:
     run([FFMPEG, "-y", "-v", "error", "-f", "concat", "-safe", "0",
          "-i", str(concat_list), "-c", "copy", str(silent)])
 
-    mux_voice(silent, FINAL, cursor)
+    mux_audio(silent, FINAL, cursor)
 
     size_mb = FINAL.stat().st_size / 1e6
     console.print(
