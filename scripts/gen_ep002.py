@@ -75,6 +75,10 @@ CUTS = {
 
 WAVE = 3  # 개인 계정 동시 실행 한도
 
+# camera_fixed는 모델·태스크 조합을 탄다 — 2.0 mini의 r2v에 보내면 HTTP 400이다.
+# 컷 프롬프트에 "Camera does not move"가 들어 있어 의도 자체는 유지된다.
+SUPPORTS_CAMERA_FIXED = "seedance-2-5" in MODEL
+
 
 def main():
     names = sys.argv[1:] or list(CUTS)
@@ -101,7 +105,7 @@ def main():
                     resolution="720p",
                     ratio="9:16",
                     duration=dur,
-                    camera_fixed=fixed or None,
+                    camera_fixed=(fixed or None) if SUPPORTS_CAMERA_FIXED else None,
                 )
             except ark.ModelArkError as exc:
                 console.print(f"  [red]✗ {name} 제출 실패: {exc}[/red]")

@@ -1,52 +1,84 @@
 # episode-002 컷 생성 보고
 
 - 일시: 2026-08-28
-- 실행 환경: Claude Code 원격 컨테이너 (`/home/user/k-youtube`)
-- 브랜치: `claude/c-dance-video-production-d2huo8` @ `f607178`
+- 모델: `dreamina-seedance-2-0-mini-260615` (720p · 9:16)
+- 브랜치: `claude/c-dance-video-production-d2huo8`
+- 실행 환경: Claude Code 원격 컨테이너
 
-## 결과 — 생성 0/8, 전량 실패
+## 결과 — 8/8 성공
 
-**원인: 모델 미활성화.** 계정 `3004081739`이 `dreamina-seedance-2-5-260628`을
-활성화하지 않아 태스크 제출 단계(HTTP 404)에서 전부 거부됐습니다.
+| 컷 | 결과 | 크기 | 스펙 | 토큰 |
+|---|---|---|---|---|
+| cut1 | ✓ | 2.8MB | 720x1280 · 4.0초 | 87,300 |
+| cut2 | ✓ | 2.6MB | 720x1280 · 4.0초 | 87,300 |
+| cut3 | ✓ | 2.6MB | 720x1280 · 4.0초 | 87,300 |
+| cut5 | ✓ | 2.9MB | 720x1280 · 4.0초 | 87,300 |
+| cut6 | ✓ | 3.1MB | 720x1280 · 4.0초 | 87,300 |
+| cut7 | ✓ | 2.8MB | 720x1280 · 5.0초 | 108,900 |
+| cut8a | ✓ | 2.6MB | 720x1280 · 4.0초 | 87,300 |
+| cut8b | ✓ | 2.7MB | 720x1280 · 4.0초 | 87,300 |
+| **합계** | **8/8** | **22.2MB** | **33초** | **720,000** |
+
+CUT 4(택배 스틸)는 계획대로 생성하지 않았습니다 — 조립에서 켄번즈 처리.
+
+## 재시도 내역 — 컷 실패 0회, 사전 오류 3종
+
+생성 자체는 한 번도 실패하지 않았습니다. 대신 제출 단계에서 세 가지 제약에
+연달아 걸렸고, 각각 고친 뒤 통과했습니다. **실패한 제출은 과금되지 않습니다.**
+
+### 1. 모델 미활성화 → 2.0 mini로 교체
 
 ```
-{"error":{"code":"ModelNotOpen","message":"Your account 3004081739 has not
-activated the model dreamina-seedance-2-5-260628. Please activate the model
-service in the Ark Console.","type":"Not Found"}}
+ModelNotOpen: account 3004081739 has not activated dreamina-seedance-2-5-260628
 ```
 
-| 컷 | 결과 | 파일 크기 | 비고 |
-|---|---|---|---|
-| cut1 | ✗ 제출 실패 | — | ModelNotOpen |
-| cut2 | ✗ 제출 실패 | — | ModelNotOpen |
-| cut3 | ✗ 제출 실패 | — | ModelNotOpen |
-| cut5 | 미시도 | — | 웨이브 1에서 중단 |
-| cut6 | 미시도 | — | 〃 |
-| cut7 | 미시도 | — | 〃 |
-| cut8a | 미시도 | — | 〃 |
-| cut8b | 미시도 | — | 〃 |
+계정에 Seedance 2.5가 열려 있지 않습니다. 2.5를 쓰려면 Ark Console에서
+활성화해야 합니다(2.x 계열은 잔액 USD 30 이상 조건).
 
-**토큰·사용량: 0.** 생성이 시작되지 않아 과금이 없습니다.
-**재시도: 하지 않음.** 재시도해도 같은 결과이므로 웨이브 1에서 멈췄습니다.
+### 2. 레퍼런스 이미지가 최소 크기 미달
 
-## 사전 점검 (전부 통과)
+```
+expected the width to be at least 300px, but received a 97x107px image
+```
 
-- `MODELARK_API_KEY` 존재 확인 (`python3 config.py`, 값 미출력)
-- `assets/yuna/` 레퍼런스 12개 전부 존재
-- `pip install -r requirements.txt` 정상
+`character_sheet.png`가 713x1063이라 거기서 뜬 크롭이 80~130px밖에 안 됐습니다.
+원본에서 다시 잘라도 300px이 안 나오므로 **LANCZOS로 확대 후 약한 언샵**을
+적용했습니다(가장 짧은 변 320px 기준, 배율 2.5~4.0x).
 
-즉 막힌 건 코드·자산·키가 아니라 **콘솔의 모델 활성화 하나**입니다.
+| 파일 | 이전 | 이후 |
+|---|---|---|
+| exp_excited | 107x107 | 320x320 |
+| exp_happy | 97x107 | 320x353 |
+| exp_hmm | 107x117 | 320x350 |
+| exp_surprised | 112x105 | 341x320 |
+| exp_thinking | 102x105 | 320x329 |
+| exp_yummy | 112x107 | 335x320 |
+| pose_glass | 130x145 | 320x357 |
+| ref_front | 80x283 | 320x1132 → 472x1132 |
 
-## 필요한 조치
+> ⚠️ 확대는 없는 정보를 만들어내지 못합니다. 캐릭터 일관성이 아쉬우면
+> 시트를 더 큰 해상도로 다시 뽑아 크롭하는 편이 근본적입니다.
 
-1. Ark Console에서 `dreamina-seedance-2-5-260628` 활성화
-   (Seedance 2.x 계열은 계정 잔액 USD 30 이상 또는 그에 준하는 리소스팩이 조건.
-   ep001에 쓴 `dreamina-seedance-2-0-mini-260615`는 이미 활성화돼 있음)
-2. 활성화 후 `python3 -m scripts.gen_ep002` 재실행
+### 3. 레퍼런스 종횡비 초과
 
-## 대안 — 2.0 mini로 내리기
+```
+expected the aspect ratio to be between 0.40 and 2.50, but received 3.54
+```
 
-`scripts/gen_ep002.py`의 `MODEL`만 `dreamina-seedance-2-0-mini-260615`로 바꾸면
-활성화된 모델로 돌아갑니다. 이 스크립트는 컷당 레퍼런스를 최대 3장만 쓰므로
-2.0의 9장 한도에 걸리지 않습니다. 다만 화질·캐릭터 일관성이 2.5보다 떨어지고,
-ep002를 2.5로 잡은 건 의도적인 선택으로 보여 임의로 바꾸지 않았습니다.
+확대된 `ref_front.png`가 1:3.54가 됐습니다. 가장자리에서 뽑은 배경색
+`RGB(253,244,235)`으로 좌우에 여백을 덧대 1:2.40으로 맞췄습니다.
+
+### 4. camera_fixed 미지원 (cut7)
+
+```
+camera_fixed is not supported for model dreamina-seedance-2-0-mini in r2v
+```
+
+2.0 mini의 reference-to-video는 이 파라미터를 받지 않습니다.
+`scripts/gen_ep002.py`에 `SUPPORTS_CAMERA_FIXED` 가드를 넣어 2.5일 때만
+보내도록 했습니다. cut7 프롬프트에 "Camera does not move"가 이미 있어
+의도는 유지됩니다.
+
+## 다음 단계
+
+`output/ep002/cuts/`의 8개 클립으로 조립을 이어가면 됩니다.
