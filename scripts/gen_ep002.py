@@ -19,7 +19,8 @@ from src.providers import modelark_video as ark
 
 console = Console()
 
-MODEL = "dreamina-seedance-2-5-260628"
+# 2.5(dreamina-seedance-2-5-260628)는 계정 미활성화(잔액 USD 30 조건) — 활성화되면 되돌릴 것
+MODEL = "dreamina-seedance-2-0-mini-260615"
 OUT = Path("output/ep002/cuts")
 YUNA = Path("assets/yuna")
 
