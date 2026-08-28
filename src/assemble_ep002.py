@@ -48,64 +48,73 @@ FONT_SIZE = 40
 WRAP_CHARS = 15
 Y_SUB = 880
 
-# 컷 구성: (소스, 슬롯 길이, 배속) — 배속<1은 슬로우. "STILL"은 택배 스틸 컷.
+# 컷 구성: (소스, 슬롯 길이, 배속, 소스 시작초) — 배속<1은 슬로우. "STILL"은 택배 스틸 컷.
+# cut1은 상상 컷(cut1d)을 사이에 두고 홀림(1a)/가격 충격(1b)으로 쪼개 쓴다.
 CUTS = [
-    ("cut1.mp4", 4.8, 0.833),   # 홀림 → 가격 충격
-    ("cut2.mp4", 5.0, 0.80),    # 시무룩
-    ("cut3.mp4", 4.6, 0.87),    # 번뜩 → 아싸
-    ("STILL",    2.0, 1.0),     # 딩동 · 택배
-    ("cut5.mp4", 4.0, 1.0),     # 언박싱
-    ("cut6.mp4", 2.2, 1.82),    # 냉장고 대시
-    ("cut7.mp4", 5.0, 1.0),     # ★붓기 머니샷
-    ("cut8a.mp4", 3.2, 1.25),   # 원샷
-    ("cut8b.mp4", 4.2, 0.95),   # 최고!
+    ("cut1.mp4", 3.2, 0.85, 0.0),    # 1a 홀림
+    ("cut1d.mp4", 9.8, 1.0, 0.0),    # 상상 — 맥주 망상
+    ("cut1.mp4", 1.6, 0.85, 2.6),    # 1b 가격 충격 (상상에서 추락)
+    ("cut2.mp4", 5.0, 0.80, 0.0),    # 시무룩
+    ("cut3.mp4", 4.6, 0.87, 0.0),    # 번뜩 → 아싸
+    ("STILL",    2.0, 1.0, 0.0),     # 딩동 · 택배
+    ("cut5.mp4", 4.0, 1.0, 0.0),     # 언박싱
+    ("cut6.mp4", 2.2, 1.82, 0.0),    # 냉장고 대시
+    ("cut7.mp4", 5.0, 1.0, 0.0),     # ★붓기 머니샷
+    ("cut8a.mp4", 3.2, 1.25, 0.0),   # 원샷
+    ("cut8b.mp4", 4.2, 0.95, 0.0),   # 최고!
 ]
 
 # 보이스: (파일명, 시작초) — 시각은 영상 전체 기준
 VOICE = [
     ("01_hook_a", 0.3),
-    ("01_hook_b", 3.8),
-    ("02_sulk", 5.2),
-    ("03_idea", 10.0),
-    ("03_yes", 12.5),
-    ("05_arrive", 16.9),
-    ("08_kya", 30.0),
-    ("08_final", 31.4),
-    ("08_best", 33.8),
+    ("01_cool", 3.9),
+    ("01_imagine", 7.0),
+    ("01_kya", 11.2),
+    ("01_hook_b", 13.4),
+    ("02_sulk", 15.0),
+    ("03_idea", 19.7),
+    ("03_yes", 22.1),
+    ("05_arrive", 26.7),
+    ("08_kya", 39.8),
+    ("08_final", 41.2),
+    ("08_best", 43.6),
 ]
 
 # 자막 = 대사와 같은 문장·같은 시각 (branding.md §8)
 SUBTITLES = [
     ("우와… 이 잔 뭐야…", 0.3, 3.7),
-    ("5만 원…?", 3.8, 4.9),
-    ("아무리 그래도 잔 하나에 5만 원은…", 5.2, 9.8),
-    ("혹시… 인터넷?!", 10.0, 12.3),
-    ("2만 원?! 아싸!", 12.5, 14.4),
-    ("왔다…!", 16.9, 18.2),
-    ("캬아~", 30.0, 31.0),
-    ("기다린 보람이 있잖아~!", 31.4, 33.6),
-    ("최고!", 33.8, 34.9),
+    ("보기만 해도 시원하잖아…", 3.9, 6.8),
+    ("여기에 맥주 딱 하면…", 7.0, 11.0),
+    ("크으~", 11.2, 12.9),
+    ("5만 원…?", 13.4, 14.5),
+    ("아무리 그래도 잔 하나에 5만 원은…", 15.0, 19.6),
+    ("혹시… 인터넷?!", 19.7, 22.0),
+    ("쿠팡 2만 원?! 아싸!", 22.1, 24.5),
+    ("왔다…!", 26.7, 28.0),
+    ("캬아~", 39.8, 40.8),
+    ("기다린 보람이 있잖아~!", 41.2, 43.4),
+    ("최고!", 43.6, 44.7),
 ]
 
 # 강조 — 대사에 있는 단어만 키운다 (2만 원 반전): (텍스트, 시작, 끝, 크기, 색, y)
 EMPHASIS = [
-    ("2만 원?!", 12.5, 14.4, 76, "#F28C39", 500),
+    ("2만 원?!", 22.1, 24.5, 76, "#F28C39", 500),
 ]
 
-# 가격표 오버레이 — CUT 1의 빈 가격표 위에 얹는다. 컷 확인 후 좌표 조정.
-PRICE_TAG = ("₩50,000", 2.6, 4.8, 46, "white", 750)
+# 가격표 오버레이 — 상상에서 추락하는 1b 구간에 등장. 컷 확인 후 좌표 조정.
+PRICE_TAG = ("₩50,000", 13.0, 14.6, 46, "white", 750)
 
 BGM = "bgm.mp3"
 BGM_GAIN = 0.16
 SFX_GAIN = 0.34
 # (파일, 시작초) — output/ep002/audio/ 에 파일이 생기면 자동으로 얹는다
 SFX = [
-    ("sfx_thud.mp3", 2.6),        # 가격 충격 "쿵"
-    ("sfx_dingdong.mp3", 14.5),   # 초인종
-    ("sfx_dash.mp3", 20.6),       # 후다닥
-    ("sfx_can_open.mp3", 22.8),   # 캔 칙-
-    ("sfx_pour.mp3", 23.6),       # 따르는 소리
-    ("sfx_sparkle.mp3", 33.8),    # 최고! 반짝
+    ("sfx_thud.mp3", 13.1),       # 가격 충격 "쿵" (상상 추락)
+    ("sfx_dingdong.mp3", 24.8),   # 초인종
+    ("sfx_dash.mp3", 30.4),       # 후다닥
+    ("sfx_can_open.mp3", 32.6),   # 캔 칙-
+    ("sfx_pour.mp3", 33.4),       # 따르는 소리
+    ("sfx_sparkle.mp3", 43.6),    # 최고! 반짝
 ]
 
 
@@ -222,7 +231,7 @@ def make_still(duration: float, labels, output: Path) -> None:
 
 
 def prepare_cut(index: int, name: str, duration: float, speed: float,
-                cut_start: float) -> Path:
+                cut_start: float, ss: float = 0.0) -> Path:
     output = WORK_DIR / f"{index:02d}_{Path(name).stem}.mp4"
     labels = overlays_for_cut(cut_start, cut_start + duration)
 
@@ -231,7 +240,10 @@ def prepare_cut(index: int, name: str, duration: float, speed: float,
         console.print(f"  [green]✓[/green] [{index}] 택배 스틸 → {duration}초")
         return output
 
-    args = [FFMPEG, "-y", "-v", "error", "-i", str(SRC_DIR / name)]
+    args = [FFMPEG, "-y", "-v", "error"]
+    if ss > 0:
+        args += ["-ss", str(ss)]
+    args += ["-i", str(SRC_DIR / name)]
     for path, _, _, _ in labels:
         args += ["-i", str(path)]
 
@@ -308,14 +320,14 @@ def main() -> Path:
     console.print("\n[bold blue]━━ episode-002 조립 ━━[/bold blue]\n")
     WORK_DIR.mkdir(parents=True, exist_ok=True)
 
-    missing = [n for n, _, _ in CUTS if n != "STILL" and not (SRC_DIR / n).exists()]
+    missing = [n for n, _, _, _ in CUTS if n != "STILL" and not (SRC_DIR / n).exists()]
     if missing:
         console.print(f"[red]✗ 컷 파일 없음: {missing} — 생성이 끝난 뒤 실행하세요.[/red]")
         raise SystemExit(1)
 
     segments, cursor = [], 0.0
-    for i, (name, duration, speed) in enumerate(CUTS):
-        segments.append(prepare_cut(i, name, duration, speed, cursor))
+    for i, (name, duration, speed, ss) in enumerate(CUTS):
+        segments.append(prepare_cut(i, name, duration, speed, cursor, ss))
         cursor += duration
 
     concat_list = WORK_DIR / "concat.txt"

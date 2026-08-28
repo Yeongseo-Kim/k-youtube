@@ -61,11 +61,11 @@
 | 1 | reference-to-video | 유나 크롭 + "홀림→충격" | 4초 | $0.12 |
 | 2 | reference-to-video | 유나 크롭 + "시무룩" | 4초 | $0.12 |
 | 3 | reference-to-video | 유나 크롭 + "어라?→신남" (폰 인서트는 스틸 편집) | 4초 | $0.12 |
-| 4 | 스틸 편집 | 택배 박스 스틸 | 2초 | $0 |
-| 5 | image-to-video | 잔 제품 사진 (`ref_glass.png`) | 4초 | $0.12 |
+| 4 | 스틸 편집 | `still_package.png` 켄번즈 | 2초 | $0 |
+| 5 | **실사 i2v** (first frame) | `frame_unbox.png` — 실물 잔이 박스 안에 | 4초 | $0.12 |
 | 6 | reference-to-video | 유나 크롭 + "대시" | 2초 | $0.12 |
-| 7 | image-to-video | 잔 제품 사진 + 붓기 프롬프트 | 5초 | $0.15 |
-| 8a·b | reference-to-video | 유나 크롭 + "신남/최고" | 4초×2 | $0.24 |
+| 7 | **실사 i2v** (first+last frame) | `frame_empty.png` → `frame_filled.png` — 실물 잔이 차오름 | 5초 | $0.15 |
+| 8a·b | reference-to-video | 유나 크롭 + `frame_filled.png`(실물 레퍼런스) | 4초×2 | $0.24 |
 
 편당 약 **$0.99**. CUT 7 재시도 예산을 넉넉히 잡아 편당 $3 안쪽으로 본다.
 
@@ -108,4 +108,8 @@
 | `exp_surprised.png` | 어라? — CUT 3 번뜩 | ✓ |
 | `exp_thinking.png` | 뭐 먹지? — 예비 | ✓ |
 | `pose_glass.png` | 잔 들고 있는 포즈 (말풍선 제거됨) — CUT 8b | ✓ |
-| `ref_glass.png` | 잔 제품 사진 (레퍼런스) — CUT 5·7, 텍스트·박스 없는 잔 단독컷으로 | **저장 필요** |
+| `product_photo.png` | 실물 제품 사진 원본 (사용자 제공) | ✓ |
+| `frame_filled.png` | 실물 잔 · 찬 상태 · 주방 (Gemini 편집) — CUT 7 끝 프레임, 8a·b 레퍼런스 | ✓ |
+| `frame_empty.png` | 실물 잔 · 빈 상태(반투명) — CUT 7 첫 프레임, CUT 1 레퍼런스 | ✓ |
+| `frame_unbox.png` | 실물 잔 · 박스 안 — CUT 5 첫 프레임 | ✓ |
+| `ref_glass.png` | (구) 생성 잔 — 실물로 대체되어 미사용 | 폐기 |
