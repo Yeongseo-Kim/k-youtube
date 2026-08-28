@@ -54,6 +54,14 @@ CUTS = {
         "hands clasped in adoration. The camera tilts down to a small blank price tag below the mug, "
         "then back up to her face now frozen stiff like stone, vertical anime gloom shading over "
         "her forehead. One continuous gentle shot."),
+    # 상상 컷 — CUT 1과 가격 충격 사이에 들어가는 망상 시퀀스 (총 9.8초 슬롯)
+    "cut1d": (10, False, ["exp_happy.png", "pose_glass.png", "frame_filled.png"], None,
+        GLASS +
+        "A fantasy daydream sequence framed like a thought bubble: soft glowing pastel clouds "
+        "around the edges of the frame, hazy golden sparkling atmosphere. The woman blissfully "
+        "lifts the frosted mug full of golden beer, takes a long happy gulp with eyes closed, "
+        "then beams with a huge satisfied grin, floating hearts and sparkles around her. "
+        "Gentle slow dreamy motion, warm glow, pure bliss."),
     "cut2": (4, False, ["exp_hmm.png", "ref_front.png"], None,
         "The woman turns away from the display shelf, shoulders slumping heavily, head drooping, "
         "a small dark anime gloom cloud hovering above her head as she exhales a visible sigh. "
