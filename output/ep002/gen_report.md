@@ -61,6 +61,35 @@
 
 이로써 **컷 9개 보유** (cut1, 1d, 2, 3, 5, 6, 7, 8a, 8b) · 총 43초.
 
+## 추가 — ElevenLabs 보이스 오디션 4종 (2026-08-28)
+
+`ELEVENLABS_API_KEY` **있음**(존재만 확인, 값 미출력).
+
+대사 `쿠팡 2만 원?! 아싸! 캬아~ 기다린 보람이 있잖아~!`
+설정 `eleven_multilingual_v2` · stability 0.4 · similarity 0.75 · style 0.6 · speaker_boost on
+저장 `output/ep002/voice_audition_eleven/`
+
+| 이름 | voice_id | 길이 | 특징 |
+|---|---|---|---|
+| JY | `bQlkYuipD5BHEhntA5iz` | 3.7초 | Trendy K-Culture Vlog Girl · upbeat · 서울. 브이로그 톤, 넷 중 텐션이 가장 높다 |
+| Hanabad | `YDseIkMzKtO5bK1Ehnev` | 3.5초 | Calm & Friendly · confident · 서울. 밝지만 촐랑대지 않는 안정감 |
+| JeongAh | `airYK6ydeWdrJg6gyZA3` | 3.6초 | Jeong-Ah Versatile · 표준어. 폭이 넓어 style을 올리면 잘 따라온다 |
+| RumiOh | `sf8Bpb1IU97NI9BHSMRf` | 6.1초 | Rumi Oh · conversational · soft · 서울. 낭독조로 안 빠지고 말맛이 산다 |
+
+세린에 쓴 `kkcz4LrkBf4xax9Q5g0Z`(Aisha)는 지시대로 제외했습니다.
+
+**선정 기준.** 라이브러리의 한국어 여성 음성은 대부분 `descriptive=calm`으로
+태깅돼 있어 유나의 높은 텐션과 안 맞습니다. `upbeat`(JY)·`confident`(Hanabad)를
+우선 고르고, 나머지 둘은 태그보다 실제 폭이 넓을 것으로 본 versatile·conversational을
+넣었습니다. stability 0.4 / style 0.6이면 calm 태깅 음성도 상당히 살아납니다.
+
+> ⚠️ **RumiOh만 6.1초로 다른 셋(3.5~3.7초)보다 눈에 띄게 느립니다.**
+> 같은 대사·같은 설정인데 발화 속도가 다릅니다. 채택 시 `speed`를 올려야
+> 쇼츠 리듬에 맞을 겁니다.
+
+> 참고 — JY와 RumiOh는 세린 오디션 때 이미 들어보고 세린에는 안 맞다고
+> 판단했던 음성입니다. 유나의 밝은 텐션에는 반대로 맞을 수 있습니다.
+
 ## 이전 회차 기록 (2.0 mini 최초 생성)
 
 제출 단계에서 세 가지 제약에 걸려 각각 고쳤습니다. 거부된 제출은 과금되지 않습니다.
