@@ -73,8 +73,9 @@
 
 - BGM: 밝은 우쿨렐레/팝. 세린의 로우파이와 반대 — 유나는 텐션 캐릭터. CUT 7만 BGM 죽이고 ASMR
 - 자막: 굵은 산세리프, **대사와 글자 단위로 일치** (대사 없는 컷은 자막도 없음). 세이프존 — 하단 20% 위
-- 보이스: ElevenLabs `eleven_multilingual_v2` · voice_id `xi3rF0t7dg7uN2M0WUhr` · stability 0.4 / style 0.6.
-  하이톤, 텐션 업다운 큼 — 세린과 정반대. (Gemini TTS Leda로 초안 → 사용자 선택으로 교체)
+- 보이스(확정): **Gemini TTS `gemini-3.1-flash-tts-preview` · Leda** · 라인별 감정 지시 + 라인별 1.1~1.3배속.
+  하이톤, 텐션 업다운 큼 — 세린(Zephyr 무억양)과 정반대. 생성: `scripts/voice_ep002.py`
+  (ElevenLabs v2/v3도 오디션했으나 Leda로 회귀 — v3 태그 방식 기록은 `scripts/voice_ep002_eleven.py`)
 - 컬러: 유나 팔레트 오렌지(#F28C39) 액센트. 실사 컷도 따뜻한 톤으로 그레이딩
 - 해시태그: `#맥주잔 #혼술 #자취템 #쿠팡템 #언박싱`
 - 고정 댓글: `잔 정보 묻는 분들이 많아서 — 도요사사키(TOYO-SASAKI) 泡立つ 비어글라스. 백화점 말고 온라인에서 2만원대예요. 프로스트 유리라 뭘 따라도 거품 낀 생맥주처럼 보여요.`
