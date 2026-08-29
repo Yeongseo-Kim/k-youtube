@@ -216,12 +216,15 @@ LOCALIZATION_TARGETS = {
 
 
 def translate_and_localize(youtube, video_id: str, metadata: dict):
-    """GPT로 제목·설명 다국어 번역 → YouTube localizations API 등록"""
-    from openai import OpenAI
-    client = OpenAI(api_key=config.OPENAI_API_KEY)
+    """Gemini로 제목·설명 다국어 번역 → YouTube localizations API 등록
 
-    title_en = metadata.get("title", "")
-    desc_en = metadata.get("description", "")
+    원문은 한국어다. snippet은 건드리지 않고 localizations만 갱신한다 —
+    옛 버전이 categoryId·defaultLanguage를 영어 기준으로 덮어쓰던 버그 수정.
+    """
+    import urllib.request
+
+    title_ko = metadata.get("title", "")
+    desc_ko = metadata.get("description", "")
 
     console.print(f"  [dim]🌏 다국어 번역 중 ({len(LOCALIZATION_TARGETS)}개 언어)...[/dim]")
 
@@ -229,33 +232,38 @@ def translate_and_localize(youtube, video_id: str, metadata: dict):
         f'"{code}": translate to {name}'
         for code, name in LOCALIZATION_TARGETS.items()
     )
-
-    resp = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[{"role": "user", "content":
-            f"Translate the following YouTube Shorts title and description for K-content fans.\n\n"
-            f"TITLE (English): {title_en}\n"
-            f"DESCRIPTION (English): {desc_en}\n\n"
-            f"Translate into these languages:\n{lang_list}\n\n"
-            f"Rules:\n"
-            f"- Keep hashtags (#Shorts #Kpop etc.) in original English at the end\n"
-            f"- Title: keep under 60 chars, keep energy and excitement\n"
-            f"- Description: natural, culturally appropriate tone for K-content fans\n"
-            f"- Return ONLY valid JSON: {{\"ja\": {{\"title\": \"...\", \"description\": \"...\"}}, ...}}"
-        }],
-        response_format={"type": "json_object"},
-        temperature=0.7,
+    prompt = (
+        "Translate this KOREAN YouTube Shorts title and description.\n\n"
+        f"TITLE (Korean): {title_ko}\n"
+        f"DESCRIPTION (Korean): {desc_ko}\n\n"
+        f"Translate into these languages:\n{lang_list}\n\n"
+        "Rules:\n"
+        "- Keep the cute, energetic first-person tone of the original\n"
+        "- Keep URLs, the affiliate-disclosure sentence meaning, music credit, "
+        "and hashtags; hashtags stay as-is at the end\n"
+        "- Title: under 60 chars\n"
+        '- Return ONLY valid JSON: {"ja": {"title": "...", "description": "..."}, ...}'
     )
+    body = json.dumps({
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {"responseMimeType": "application/json"},
+    }).encode()
+    request = urllib.request.Request(
+        "https://generativelanguage.googleapis.com/v1beta/models/"
+        f"gemini-2.5-flash:generateContent?key={config.GEMINI_API_KEY}",
+        data=body, headers={"Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(request, timeout=180) as response:
+        payload = json.load(response)
+    translations = json.loads(
+        payload["candidates"][0]["content"]["parts"][0]["text"])
 
-    translations = json.loads(resp.choices[0].message.content)
-
-    # YouTube localizations 등록
     localizations = {}
     for code, texts in translations.items():
         if isinstance(texts, dict) and "title" in texts:
             localizations[code] = {
                 "title": texts["title"][:100],
-                "description": texts.get("description", desc_en),
+                "description": texts.get("description", desc_ko),
             }
 
     if not localizations:
@@ -263,19 +271,8 @@ def translate_and_localize(youtube, video_id: str, metadata: dict):
         return
 
     youtube.videos().update(
-        part="localizations,snippet",
-        body={
-            "id": video_id,
-            "snippet": {
-                "title": title_en[:100],
-                "description": desc_en,
-                "categoryId": "24",
-                "defaultLanguage": "en",
-                "defaultAudioLanguage": "en",
-                "tags": _trim_tags(metadata.get("tags", "")),
-            },
-            "localizations": localizations,
-        },
+        part="localizations",
+        body={"id": video_id, "localizations": localizations},
     ).execute()
 
     console.print(f"  [green]✓ 다국어 설정 완료: {', '.join(localizations.keys())}[/green]")
