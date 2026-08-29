@@ -23,24 +23,24 @@ from src.providers.gemini_tts import duration_of
 
 console = Console()
 
-VOICE_ID = "xi3rF0t7dg7uN2M0WUhr"
+VOICE_ID = "Lb7qkOn5hF8p7qfCDH8q"  # 사용자 선택 (G)
 MODEL = "eleven_v3"
-OUT_DIR = Path("output/ep002/voice_eleven_v3")
+OUT_DIR = Path("output/ep002/voice_g")
 
 # (파일명, 대사(자막과 동일), 태그·안정성)
 LINES = [
     ("01_hook_a", "우와… 이 잔 뭐야…", "[excited whisper, giddy]", 0.25),
     ("01_cool", "보기만 해도 시원하잖아…", "[giddy, delighted]", 0.25),
     ("01_imagine", "여기에 맥주 딱 하면…", "[playful, dreamy excitement]", 0.25),
-    ("01_kya", "크으~", "[gleeful, savoring the imaginary sip]", 0.15),
+    ("01_kya", "크으~", "[gleeful, savoring the imaginary sip]", 0.3),
     ("01_hook_b", "5만 원…?", "[stunned, deflating]", 0.3),
     ("02_sulk", "아무리 그래도 잔 하나에 5만 원은…", "[pouting, whiny but cute]", 0.3),
-    ("03_idea", "혹시… 인터넷?!", "[gasp, sudden burst of hope]", 0.2),
-    ("03_yes", "쿠팡 2만 원?! 아싸!", "[overjoyed shout, jumping with joy]", 0.15),
-    ("05_arrive", "왔다…!", "[thrilled gasp, giddy]", 0.2),
-    ("08_kya", "캬아~", "[delighted refreshed exclamation, bursting with pleasure]", 0.15),
-    ("08_final", "기다린 보람이 있잖아~!", "[triumphant, laughing with joy]", 0.2),
-    ("08_best", "최고!", "[beaming, punchy cheer]", 0.2),
+    ("03_idea", "혹시… 인터넷?!", "[gasp, sudden burst of hope]", 0.3),
+    ("03_yes", "쿠팡 2만 원?! 아싸!", "[overjoyed shout, jumping with joy]", 0.25),
+    ("05_arrive", "왔다…!", "[thrilled gasp, giddy]", 0.3),
+    ("08_kya", "캬아~", "[delighted refreshed exclamation, bursting with pleasure]", 0.25),
+    ("08_final", "기다린 보람이 있잖아~!", "[triumphant, laughing with joy]", 0.3),
+    ("08_best", "최고!", "[beaming, punchy cheer]", 0.3),
 ]
 
 SILENCE = ("silenceremove=start_periods=1:start_silence=0.05:"
