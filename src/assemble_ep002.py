@@ -106,15 +106,21 @@ EMPHASIS = [
 PRICE_TAG = ("₩50,000", 6.7, 7.9, 46, "white", 750)
 
 BGM = "bgm.mp3"
-BGM_GAIN = 0.16
-SFX_GAIN = 0.34
+BGM_GAIN = 0.30
+SFX_GAIN = 0.75
 # (파일, 시작초) — output/ep002/audio/ 에 파일이 생기면 자동으로 얹는다
 SFX = [
-    ("sfx_thud.mp3", 6.8),        # 가격 충격 "쿵" (상상 추락)
+    ("sfx_harp.mp3", 2.3),        # 상상 진입 하프
+    ("sfx_gulp.mp3", 5.5),        # 상상 속 꿀꺽꿀꺽
+    ("sfx_scratch.mp3", 6.5),     # 상상 → 현실 추락
+    ("sfx_thud.mp3", 6.8),        # 가격 충격 "쿵"
+    ("sfx_ding_idea.mp3", 11.1),  # 전구 띠링
     ("sfx_dingdong.mp3", 15.1),   # 초인종
+    ("sfx_rustle.mp3", 16.3),     # 박스 부스럭
     ("sfx_dash.mp3", 18.9),       # 후다닥
-    ("sfx_can_open.mp3", 20.4),   # 캔 칙-
-    ("sfx_pour.mp3", 21.1),       # 따르는 소리
+    ("sfx_can_open.mp3", 20.4),   # 캔 치익
+    ("sfx_pour.mp3", 21.0),       # 맥주 따르는 소리
+    ("sfx_gulp.mp3", 24.9),       # 원샷 꿀꺽꿀꺽
     ("sfx_sparkle.mp3", 29.8),    # 최고! 반짝
 ]
 
@@ -302,7 +308,7 @@ def mux_audio(video: Path, output: Path, total: float) -> None:
                      f"aformat=sample_rates=44100:channel_layouts=stereo[bgmraw]")
         parts.append("[voice]asplit=2[voice_out][voice_sc]")
         parts.append("[bgmraw][voice_sc]sidechaincompress="
-                     "threshold=0.03:ratio=12:attack=15:release=350[bgm]")
+                     "threshold=0.05:ratio=6:attack=15:release=250[bgm]")
         mix_in = "[voice_out][bgm]" + "".join(sfx_labels)
         count = 2 + len(sfx_labels)
     else:
