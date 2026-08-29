@@ -107,21 +107,28 @@ PRICE_TAG = ("₩50,000", 6.7, 7.9, 46, "white", 750)
 
 BGM = "bgm.mp3"
 BGM_GAIN = 0.30
-SFX_GAIN = 0.75
+SFX_GAIN = 0.85
 # (파일, 시작초) — output/ep002/audio/ 에 파일이 생기면 자동으로 얹는다
 SFX = [
     ("sfx_harp.mp3", 2.3),        # 상상 진입 하프
     ("sfx_gulp.mp3", 5.5),        # 상상 속 꿀꺽꿀꺽
     ("sfx_scratch.mp3", 6.5),     # 상상 → 현실 추락
     ("sfx_thud.mp3", 6.8),        # 가격 충격 "쿵"
-    ("sfx_ding_idea.mp3", 11.1),  # 전구 띠링
+    ("sfx_sigh.mp3", 10.9),       # 시무룩 한숨 (유나 보이스)
+    ("sfx_ding_idea.mp3", 11.2),  # 전구 띠링
+    ("sfx_typing.mp3", 12.1),     # 토도도독 검색
     ("sfx_dingdong.mp3", 15.1),   # 초인종
     ("sfx_rustle.mp3", 16.3),     # 박스 부스럭
-    ("sfx_dash.mp3", 18.9),       # 후다닥
-    ("sfx_can_open.mp3", 20.4),   # 캔 치익
-    ("sfx_pour.mp3", 21.0),       # 맥주 따르는 소리
+    ("sfx_dash.mp3", 18.9),       # 후다닥 휙
+    ("sfx_steps.mp3", 18.9),      # 달리는 발소리
+    ("sfx_can_open.mp3", 20.3),   # 캔 치익 (교체판)
+    ("sfx_impact.mp3", 20.9),     # 붓기 진입 임팩트 우퍼
+    ("sfx_pour.mp3", 21.1),       # 맥주 따르는 소리
+    ("sfx_fizz.mp3", 21.4),       # 탄산 보글보글 레이어
     ("sfx_gulp.mp3", 24.9),       # 원샷 꿀꺽꿀꺽
-    ("sfx_sparkle.mp3", 29.8),    # 최고! 반짝
+    ("sfx_jingle.mp3", 29.6),     # 엔딩 성공 징글
+    ("sfx_sparkle.mp3", 29.8),    # 반짝
+    ("sfx_clink.mp3", 30.1),      # 잔 찰랑
 ]
 
 
