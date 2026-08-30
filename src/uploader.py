@@ -10,6 +10,8 @@
 
 import json
 import argparse
+import shutil
+import subprocess
 import time
 from pathlib import Path
 from rich.console import Console
@@ -33,6 +35,9 @@ except ImportError:
 SCOPES = [
     "https://www.googleapis.com/auth/youtube.upload",
     "https://www.googleapis.com/auth/youtube",
+    # commentThreads.insert는 force-ssl을 요구한다. 이 줄을 추가한 뒤에는
+    # 기존 토큰이 무효라 `python3 -m src.uploader --auth-only`로 재인증해야 한다.
+    "https://www.googleapis.com/auth/youtube.force-ssl",
 ]
 TOKEN_PATH = Path("credentials/youtube_token.json")
 
@@ -112,8 +117,9 @@ def upload_video(
             "title": metadata.get("title", "K-Content Update")[:100],
             "description": metadata.get("description", "#Shorts"),
             "tags": _trim_tags(metadata.get("tags", "")),
-            "categoryId": "24",  # Entertainment
-            "defaultLanguage": "en",
+            # 24=Entertainment, 26=Howto & Style. 살림 콘텐츠는 26이 맞다.
+            "categoryId": metadata.get("categoryId", "24"),
+            "defaultLanguage": metadata.get("defaultLanguage", "en"),
         },
         "status": {
             "privacyStatus": privacy,
@@ -210,12 +216,15 @@ LOCALIZATION_TARGETS = {
 
 
 def translate_and_localize(youtube, video_id: str, metadata: dict):
-    """GPT로 제목·설명 다국어 번역 → YouTube localizations API 등록"""
-    from openai import OpenAI
-    client = OpenAI(api_key=config.OPENAI_API_KEY)
+    """Gemini로 제목·설명 다국어 번역 → YouTube localizations API 등록
 
-    title_en = metadata.get("title", "")
-    desc_en = metadata.get("description", "")
+    원문은 한국어다. snippet은 건드리지 않고 localizations만 갱신한다 —
+    옛 버전이 categoryId·defaultLanguage를 영어 기준으로 덮어쓰던 버그 수정.
+    """
+    import urllib.request
+
+    title_ko = metadata.get("title", "")
+    desc_ko = metadata.get("description", "")
 
     console.print(f"  [dim]🌏 다국어 번역 중 ({len(LOCALIZATION_TARGETS)}개 언어)...[/dim]")
 
@@ -223,33 +232,38 @@ def translate_and_localize(youtube, video_id: str, metadata: dict):
         f'"{code}": translate to {name}'
         for code, name in LOCALIZATION_TARGETS.items()
     )
-
-    resp = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[{"role": "user", "content":
-            f"Translate the following YouTube Shorts title and description for K-content fans.\n\n"
-            f"TITLE (English): {title_en}\n"
-            f"DESCRIPTION (English): {desc_en}\n\n"
-            f"Translate into these languages:\n{lang_list}\n\n"
-            f"Rules:\n"
-            f"- Keep hashtags (#Shorts #Kpop etc.) in original English at the end\n"
-            f"- Title: keep under 60 chars, keep energy and excitement\n"
-            f"- Description: natural, culturally appropriate tone for K-content fans\n"
-            f"- Return ONLY valid JSON: {{\"ja\": {{\"title\": \"...\", \"description\": \"...\"}}, ...}}"
-        }],
-        response_format={"type": "json_object"},
-        temperature=0.7,
+    prompt = (
+        "Translate this KOREAN YouTube Shorts title and description.\n\n"
+        f"TITLE (Korean): {title_ko}\n"
+        f"DESCRIPTION (Korean): {desc_ko}\n\n"
+        f"Translate into these languages:\n{lang_list}\n\n"
+        "Rules:\n"
+        "- Keep the cute, energetic first-person tone of the original\n"
+        "- Keep URLs, the affiliate-disclosure sentence meaning, music credit, "
+        "and hashtags; hashtags stay as-is at the end\n"
+        "- Title: under 60 chars\n"
+        '- Return ONLY valid JSON: {"ja": {"title": "...", "description": "..."}, ...}'
     )
+    body = json.dumps({
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {"responseMimeType": "application/json"},
+    }).encode()
+    request = urllib.request.Request(
+        "https://generativelanguage.googleapis.com/v1beta/models/"
+        f"gemini-2.5-flash:generateContent?key={config.GEMINI_API_KEY}",
+        data=body, headers={"Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(request, timeout=180) as response:
+        payload = json.load(response)
+    translations = json.loads(
+        payload["candidates"][0]["content"]["parts"][0]["text"])
 
-    translations = json.loads(resp.choices[0].message.content)
-
-    # YouTube localizations 등록
     localizations = {}
     for code, texts in translations.items():
         if isinstance(texts, dict) and "title" in texts:
             localizations[code] = {
                 "title": texts["title"][:100],
-                "description": texts.get("description", desc_en),
+                "description": texts.get("description", desc_ko),
             }
 
     if not localizations:
@@ -257,35 +271,62 @@ def translate_and_localize(youtube, video_id: str, metadata: dict):
         return
 
     youtube.videos().update(
-        part="localizations,snippet",
-        body={
-            "id": video_id,
-            "snippet": {
-                "title": title_en[:100],
-                "description": desc_en,
-                "categoryId": "24",
-                "defaultLanguage": "en",
-                "defaultAudioLanguage": "en",
-                "tags": _trim_tags(metadata.get("tags", "")),
-            },
-            "localizations": localizations,
-        },
+        part="localizations",
+        body={"id": video_id, "localizations": localizations},
     ).execute()
 
     console.print(f"  [green]✓ 다국어 설정 완료: {', '.join(localizations.keys())}[/green]")
 
 
-def set_thumbnail(youtube, video_id: str, thumbnail_path: Path):
-    """썸네일 설정"""
-    if not thumbnail_path.exists():
-        console.print("  [yellow]⚠ 썸네일 파일 없음 — 스킵[/yellow]")
-        return
+def set_thumbnail(youtube, video_id: str, thumbnail_path: Path, video_path: Path = None):
+    """썸네일 설정
 
+    쇼츠는 지정하지 않으면 유튜브가 임의 프레임을 골라 쓴다. thumbnail_path가
+    없으면 영상 첫 프레임을 뽑아서 대신 지정한다 (시스템 ffmpeg 필요).
+    쇼츠 커스텀 썸네일은 계정 인증(전화번호) 필요 — 미인증이면 403이 난다.
+    """
+    if not thumbnail_path.exists():
+        if not (video_path and video_path.exists() and shutil.which("ffmpeg")):
+            console.print("  [yellow]⚠ 썸네일 파일 없음 — 스킵[/yellow]")
+            return
+        console.print("  [dim]썸네일 없음 — 첫 프레임 추출 중...[/dim]")
+        thumbnail_path = thumbnail_path.with_name("thumbnail_frame0.jpg")
+        subprocess.run(
+            ["ffmpeg", "-y", "-i", str(video_path), "-frames:v", "1",
+             "-vf", "scale=1080:1920", "-q:v", "2", str(thumbnail_path)],
+            check=True, capture_output=True,
+        )
+
+    mimetype = "image/jpeg" if thumbnail_path.suffix.lower() in (".jpg", ".jpeg") else "image/png"
     youtube.thumbnails().set(
         videoId=video_id,
-        media_body=MediaFileUpload(str(thumbnail_path), mimetype="image/png"),
+        media_body=MediaFileUpload(str(thumbnail_path), mimetype=mimetype),
     ).execute()
-    console.print(f"  [green]✓ 썸네일 설정 완료[/green]")
+    console.print(f"  [green]✓ 썸네일 설정 완료: {thumbnail_path.name}[/green]")
+
+
+def post_comment(youtube, video_id: str, text: str) -> str | None:
+    """영상에 최상위 댓글을 단다.
+
+    고정(pin)은 API에 엔드포인트가 없다. commentThreads.insert / comments.update /
+    setModerationStatus / delete가 전부고 pin·featured는 목록에 없어서,
+    작성까지만 자동으로 하고 고정은 스튜디오에서 한 번 눌러야 한다.
+    """
+    if not text:
+        return None
+
+    response = youtube.commentThreads().insert(
+        part="snippet",
+        body={"snippet": {
+            "videoId": video_id,
+            "topLevelComment": {"snippet": {"textOriginal": text}},
+        }},
+    ).execute()
+
+    comment_id = response["id"]
+    console.print(f"  [green]✓ 댓글 작성 완료[/green] [dim]{comment_id}[/dim]")
+    console.print("  [yellow]→ 고정은 API로 안 됩니다. 스튜디오에서 ⋮ → '고정' 클릭[/yellow]")
+    return comment_id
 
 
 def run(output_dir: Path, video_path: Path, thumbnail_path: Path, metadata_path: Path) -> str:
@@ -311,8 +352,11 @@ def run(output_dir: Path, video_path: Path, thumbnail_path: Path, metadata_path:
             if attempt == 3:
                 raise
 
-    # 3. 썸네일 설정
-    set_thumbnail(youtube, video_id, thumbnail_path)
+    # 3. 썸네일 설정 (실패해도 업로드는 유지)
+    try:
+        set_thumbnail(youtube, video_id, thumbnail_path, video_path)
+    except Exception as e:
+        console.print(f"  [yellow]⚠ 썸네일 설정 실패: {e}[/yellow]")
 
     # 4. 다국어 제목/설명 설정
     try:
@@ -320,11 +364,19 @@ def run(output_dir: Path, video_path: Path, thumbnail_path: Path, metadata_path:
     except Exception as e:
         console.print(f"  [yellow]⚠ 다국어 설정 실패: {e}[/yellow]")
 
-    # 5. 결과 저장
+    # 5. 고정 댓글 (작성만 자동, 고정은 수동)
+    comment_id = None
+    try:
+        comment_id = post_comment(youtube, video_id, metadata.get("pinned_comment", ""))
+    except Exception as e:
+        console.print(f"  [yellow]⚠ 댓글 작성 실패: {e}[/yellow]")
+
+    # 6. 결과 저장
     result = {
         "video_id": video_id,
         "url": f"https://www.youtube.com/shorts/{video_id}",
         "privacy": config.UPLOAD_PRIVACY,
+        "comment_id": comment_id,
     }
     (output_dir / "upload_result.json").write_text(
         json.dumps(result, indent=2), encoding="utf-8"
@@ -336,12 +388,20 @@ def run(output_dir: Path, video_path: Path, thumbnail_path: Path, metadata_path:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--auth-only", action="store_true", help="OAuth 토큰 취득만 실행")
+    parser.add_argument("--comment", metavar="VIDEO_ID",
+                        help="오늘 metadata.json의 pinned_comment를 해당 영상에 작성만 실행 "
+                             "(비공개 영상은 댓글이 막혀 있어 공개 전환 후 사용)")
     args = parser.parse_args()
 
     if args.auth_only:
         console.print("[bold]YouTube OAuth 인증 시작...[/bold]")
         get_authenticated_service()
-        console.print("[bold green]✓ 인증 완료. 이제 main.py를 실행하세요.[/bold green]")
+        console.print("[bold green]✓ 인증 완료.[/bold green]")
+    elif args.comment:
+        metadata_path = config.get_today_output_dir() / "metadata.json"
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        youtube = get_authenticated_service()
+        post_comment(youtube, args.comment, metadata.get("pinned_comment", ""))
     else:
         output_dir = config.get_today_output_dir()
         run(
