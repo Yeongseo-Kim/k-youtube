@@ -30,7 +30,14 @@ GEMINI_API_KEY = _get("GEMINI_API_KEY")
 ELEVENLABS_API_KEY = _get("ELEVENLABS_API_KEY")
 
 # ── BytePlus ModelArk (Seedance 영상 생성) ──
-MODELARK_API_KEY = _get("MODELARK_API_KEY")
+# 실사용 키(기업 계정)가 있으면 그걸 쓰고, 없으면 기존 개인 계정 키로 폴백한다
+MODELARK_API_KEY_PERSONAL = _get("MODELARK_API_KEY")
+MODELARK_API_KEY_LIVE = _get("MODELARK_API_KEY_LIVE")
+MODELARK_API_KEY = MODELARK_API_KEY_LIVE or MODELARK_API_KEY_PERSONAL
+MODELARK_ACCOUNT = "live(기업)" if MODELARK_API_KEY_LIVE else "personal(개인)"
+# Assets API(가상 인물 자산 라이브러리) — Bearer 키가 아니라 AK/SK 서명
+BYTEPLUS_ACCESS_KEY = _get("BYTEPLUS_ACCESS_KEY")
+BYTEPLUS_SECRET_KEY = _get("BYTEPLUS_SECRET_KEY")
 MODELARK_BASE_URL = _get("MODELARK_BASE_URL") or "https://ark.ap-southeast.bytepluses.com/api/v3"
 # 캐릭터 락(omni reference-to-video) 지원 + 최저가 모델
 MODELARK_VIDEO_MODEL = _get("MODELARK_VIDEO_MODEL") or "dreamina-seedance-2-0-mini-260615"
@@ -40,6 +47,8 @@ _yt_secret_raw = _get("YOUTUBE_CLIENT_SECRET") or "credentials/youtube_oauth.jso
 YOUTUBE_CLIENT_SECRET = str(BASE_DIR / _yt_secret_raw) if not os.path.isabs(_yt_secret_raw) else _yt_secret_raw
 
 # ── YouTube OAuth (클라우드 배포용 refresh token 방식) ──
+# 채널별 토큰 분리 — 망상이몽 등 새 채널은 YOUTUBE_TOKEN_PATH로 지정해 집안일 채널과 섞이지 않게 한다
+YOUTUBE_TOKEN_PATH = _get("YOUTUBE_TOKEN_PATH") or "credentials/youtube_token.json"
 YOUTUBE_REFRESH_TOKEN = _get("YOUTUBE_REFRESH_TOKEN")
 YOUTUBE_OAUTH_CLIENT_ID = _get("YOUTUBE_OAUTH_CLIENT_ID")
 YOUTUBE_OAUTH_CLIENT_SECRET = _get("YOUTUBE_OAUTH_CLIENT_SECRET")
@@ -73,7 +82,8 @@ if __name__ == "__main__":
     console = Console()
 
     console.print("\n[bold]세린 파이프라인 — 설정 검증[/bold]\n")
-    console.print(f"  ModelArk Key:    {'✓ 설정됨' if MODELARK_API_KEY else '✗ 미설정'}")
+    console.print(f"  ModelArk Key:    {'✓ 설정됨' if MODELARK_API_KEY else '✗ 미설정'} — {MODELARK_ACCOUNT}")
+    console.print(f"  BytePlus AK/SK:  {'✓ 설정됨' if BYTEPLUS_ACCESS_KEY and BYTEPLUS_SECRET_KEY else '✗ 미설정'}")
     console.print(f"  ElevenLabs Key:  {'✓ 설정됨' if ELEVENLABS_API_KEY else '✗ 미설정'}")
     console.print(f"  OpenAI Key:      {'✓ 설정됨' if OPENAI_API_KEY else '✗ 미설정 (오디션용)'}")
     console.print(f"  Gemini Key:      {'✓ 설정됨' if GEMINI_API_KEY else '✗ 미설정 (오디션용)'}")

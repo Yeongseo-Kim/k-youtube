@@ -43,7 +43,7 @@ class ModelArkError(RuntimeError):
 
 def _headers() -> dict:
     if not config.MODELARK_API_KEY:
-        raise ModelArkError("MODELARK_API_KEY가 설정되지 않았습니다. .env를 확인하세요.")
+        raise ModelArkError("MODELARK_API_KEY(_LIVE)가 설정되지 않았습니다. .env를 확인하세요.")
     return {
         "Authorization": f"Bearer {config.MODELARK_API_KEY}",
         "Content-Type": "application/json",

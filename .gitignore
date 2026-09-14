@@ -15,3 +15,11 @@ venv/
 
 # OS
 .DS_Store
+
+# gosu 작업 중간 산출물 (용량) — 폐기/백업본은 로컬에만 둔다
+assets/gosu/*_warm.png
+assets/gosu/*_v1.png
+assets/gosu/*_v2.png
+assets/gosu/enemy_fire_m.png
+assets/gosu/enemy_fire_f1.png
+assets/gosu/styletest/
