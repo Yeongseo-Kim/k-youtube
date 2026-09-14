@@ -137,14 +137,35 @@ ModelArk 우회·자산등록 둘 다 접고 **Veo 3.1**로 간다. 이미 `.env
 
 **BytePlus 자산 라이브러리 개통 완료(2026-09-14)** — 기업 계정 재가입 후 전 단계가 열렸다.
 - 조직 실명인증 통과 → Advanced Creation Rights **Entry(무료)** 적용(자산 50 / 그룹 50, Free)
-- Seedance **2.5 · 2.0-mini** 활성화. 기업 API 키(`ark-`)로 태스크 생성 확인. 2.5의 정확한 모델 ID는 아직 미확인(날짜 접미사 추정 5종 전부 404)
+- Seedance **2.5 · 2.0-mini** 활성화. 기업 API 키(`ark-`)로 태스크 생성 확인. 2.5 모델 ID 확인: **`dreamina-seedance-2-5-260628`** (Model Square 상세 화면)
 - IAM 사용자 `webmaster` 생성 + 정책 **ArkFullAccess** → Access Key 발급. AK는 `AKAP`로 시작하는 47자, SK는 base64 60자
 - Assets API 실측: `ListAssetGroups`는 **`Filter.GroupType` 필수**(값 `AIGC`). 문서에 없던 부분이라 `src/providers/byteplus_assets.py`에 반영
 - **자산 그룹 생성 완료**: `group-20260914111106-jcdcp` (이름 `gosu-무영`)
 - `CreateAsset`은 공개 URL만 받는다. `raw.githubusercontent.com` URL로 등록·조회·삭제까지 왕복 확인(테스트 자산은 삭제해 쿼터 원복)
 - 실사 얼굴 직접 입력은 기업 계정에서도 여전히 차단됨 → 자산 등록 경로가 유일한 Seedance 실사 루트
 
-**남은 것** — 노고수 레퍼런스(전신 정면 1 + 얼굴 클로즈업 1)를 공개 URL로 올려 `CreateAsset` → `Active` 대기 → `asset://` URI로 영상 생성. 저장소가 public이라 푸시하면 URL이 생기는데, **푸시는 사용자 승인 후**.
+✅ **자산 등록·영상 생성 확인(2026-09-14)**
+- 등록용 레퍼런스 2장 생성: `asset_gosu_full.png`(전신 정면) · `asset_gosu_face.png`(얼굴 클로즈업, 무표정) — `scripts/gen_gosu_asset_refs.py`
+- 브랜치 `claude/c-dance-video-production-d2huo8`에 커밋·푸시 → raw URL 200 확인 후 `CreateAsset`
+- 자산 ID: 전신 `asset-20260914112233-42k92` · 얼굴 `asset-20260914112234-g85bg`. 둘 다 **Active**
+- **참조 형식은 `asset://<자산ID>`** (문서의 `asset://asset-<account>-<group>-<asset>` 형태는 SID 오류로 거부됨 — 실측)
+- 이 URI로 Seedance 2.0-mini 영상 생성 성공: `output/gosu/cuts/asset_test.mp4` (720×1280, 4초). **실사 얼굴이 거부 없이 통과**
+- 남은 제약: 2.0-mini는 720p까지. 1080p는 Seedance 2.5의 모델 ID 확인 후 재시도하거나 Veo로 커버
+
+**CUT 1 영상 완료(2026-09-14)** — Seedance 2.0-mini · 720×1280 · 각 4초, 총 24초
+- 얼굴이 담긴 스틸은 직접 못 넣는다 → CUT 1 스틸 6장도 전부 자산으로 등록해 `asset://`로 참조했다. 등록 스크립트 `scripts/gosu_assets_register.py`, ID 캐시 `assets/gosu/asset_ids.json`
+- 악녀는 별도 그룹 `group-20260914113401-wwbc9` (그룹 = 인물 단위)
+- 무료 등급 `CreateAsset`은 **3 QPM** — 연속 호출하면 429. 등록 사이에 25초 간격을 둔다
+- 생성 스크립트 `scripts/gen_gosu_video.py`, 결과 `output/gosu/cuts/c1_*.mp4`, 이어붙인 미리보기 `cut1_preview.mp4`
+- 비용: 4초 클립당 약 $0.12 (실측 87.3K 토큰 × $0.0014). 2.5 대비 6~7.6배 저렴해서 mini로 확정
+
+**CUT 1 전투 시퀀스 재작업(2026-09-14)** — "앵글이 단조롭고 속도감이 없다"는 피드백 반영
+- **원인**: 4초 한 샷을 그대로 붙이면 화면이 안 바뀐다. 훅은 샷당 0.6~1.5초로 쳐야 한다
+- **해법**: 샷을 13개로 쪼개고 앵글·무빙을 샷마다 지정 — 드론 와이드 / 발밑 틸트업 / 눈 익스트림 클로즈업 / 랙 포커스 / 손바닥 돌리인 / 핸드헬드 트래킹+속도램프 / 화염구 POV / 슬로우모션 피격 / 검 낙하 인서트 / 지면 높이 먼지 / 탑다운 포탈
+- 색감 통일: 아나모픽 룩, 청록-주황 대비, 볼류메트릭 안개
+- 오디오는 `generate_audio=True`로 **영상과 함께 생성** (무음과 토큰 소비 동일 = 추가 비용 0). 프롬프트 끝에 `Sound: ...`로 지시하고 음악·말소리는 배제
+- 스크립트 `scripts/gen_gosu_c1b.py`(샷 생성) · `src/assemble_gosu_c1.py`(트림·연결)
+- 결과 `output/gosu/cuts/cut1_fast.mp4` — 13샷 13초. 원래 계획(5초)보다 길어서 **훅 길이는 편집에서 다시 조정 필요**
 
 **다음 단계 순서**
 1. 영상 생성 (~8클립): **Veo 3.1 i2v, 1080×1920**. CUT 1은 액션 스틸을 첫 프레임으로, 한의원 컷은 표정 스틸을 첫 프레임으로
