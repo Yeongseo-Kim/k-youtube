@@ -108,11 +108,16 @@ def create_group_raw(name: str, description: str = "") -> dict[str, Any]:
     })
 
 
-def create_asset(group_id: str, url: str, name: str = "") -> str:
-    """공개 URL 이미지를 자산으로 등록 → 자산 ID (아직 Active 아님)."""
+def create_asset(group_id: str, url: str, name: str = "",
+                 asset_type: str = "Image") -> str:
+    """공개 URL의 자산을 등록 → 자산 ID (아직 Active 아님).
+
+    asset_type은 Image / Video / Audio. Seedance 2.5는 카메라 무빙 참고용으로
+    Video 자산을 받는다 (권장 구성: 얼굴 1 + 전신 1 + 씬 1 + 무빙영상 1).
+    """
     body = {
         "GroupId": group_id, "URL": url,
-        "AssetType": "Image", "ProjectName": "default",
+        "AssetType": asset_type, "ProjectName": "default",
     }
     if name:
         body["Name"] = name
