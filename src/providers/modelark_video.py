@@ -69,6 +69,18 @@ def encode_image(source: str | Path) -> str:
     return f"data:{mime};base64,{base64.b64encode(raw).decode()}"
 
 
+def _build_video_content(videos: list[str]) -> list[dict]:
+    """영상 레퍼런스 블록. 공식 형식: type=video_url, role=reference_video.
+
+    프롬프트 본문에서는 @Video1, @Video2 로 지칭한다 (문서 예시 기준).
+    공개 https URL 또는 asset:// 를 넣는다.
+    """
+    return [
+        {"type": "video_url", "video_url": {"url": v}, "role": "reference_video"}
+        for v in videos
+    ]
+
+
 def _build_content(prompt: str, images: list[str | Path], role: ImageRole) -> list[dict]:
     """텍스트 프롬프트 + 이미지 목록을 API content 배열로 변환."""
     content: list[dict] = []
@@ -87,6 +99,7 @@ def _build_content(prompt: str, images: list[str | Path], role: ImageRole) -> li
 def create_task(
     prompt: str,
     reference_images: list[str | Path] | None = None,
+    reference_videos: list[str] | None = None,
     first_frame: str | Path | None = None,
     last_frame: str | Path | None = None,
     model: str | None = None,
@@ -126,6 +139,9 @@ def create_task(
         content = _build_content(prompt, [first_frame] if first_frame else [], "first_frame")
         if last_frame:
             content += _build_content("", [last_frame], "last_frame")
+
+    if reference_videos:
+        content = content + _build_video_content(reference_videos)
 
     payload = {
         "model": model,
@@ -237,6 +253,7 @@ def generate(
     prompt: str,
     output_path: Path,
     reference_images: list[str | Path] | None = None,
+    reference_videos: list[str] | None = None,
     first_frame: str | Path | None = None,
     **kwargs,
 ) -> Path:
@@ -244,6 +261,7 @@ def generate(
     task_id = create_task(
         prompt,
         reference_images=reference_images,
+        reference_videos=reference_videos,
         first_frame=first_frame,
         **kwargs,
     )
